@@ -1,0 +1,32 @@
+[project]
+name = "bas-orchestrator"
+version = "0.1.0"
+description = "Autonomous internal-attack orchestrator that generates Abilities + Adversaries and pushes them to the BAS Platform."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "google-genai>=0.3",
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.39"]
+openai = ["openai>=1.40"]
+
+[project.scripts]
+bas = "bas.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bas"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

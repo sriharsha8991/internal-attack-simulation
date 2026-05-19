@@ -1,0 +1,34 @@
+# ============================================================================
+#  Central configuration for the BAS Orchestrator
+# ----------------------------------------------------------------------------
+#  - Secrets and runtime tunables come from environment variables.
+#  - Syntax `${VAR}` substitutes the value of $VAR (null if unset).
+#  - Syntax `${VAR:-default}` substitutes $VAR with a literal default fallback.
+#  - To use a different file, set $BAS_CONFIG to its path.
+# ============================================================================
+
+bas:
+  base_url: ${BAS_BASE_URL:-http://pelorushub.online:31763}
+  sleep_ms: 250
+  timeout: 30
+  dry_run: ${BAS_DRY_RUN:-false}
+
+  # Target environment selection. Leave both `id` and `name` null to fall back
+  # to the most-recently-updated environment.
+  environment:
+    id: ${BAS_ENVIRONMENT_ID}
+    name: ${BAS_ENVIRONMENT_NAME}
+
+llm:
+  provider: gemini                       # gemini | anthropic | openai
+  model: gemini-2.5-pro
+  classifier_model: gemini-2.5-flash     # cheap model for grounding-depth routing
+  api_key_env: GEMINI_API_KEY            # name of env var holding the key
+  temperature: 0.2
+  grounding:
+    max_grounded_calls_per_run: 40
+    default_depth: light                 # skip | light | deep
+
+run:
+  output_dir: runs
+  log_level: ${LOG_LEVEL:-INFO}
