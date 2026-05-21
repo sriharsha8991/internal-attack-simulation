@@ -5,7 +5,7 @@ Every provider implementation MUST:
     `classify_grounding_depth`, `research`),
   - increment its internal counter on every grounded call and raise
     `GroundingBudgetExceeded` once the per-run cap is hit (fail-closed),
-  - expose `provider_id` like `"gemini:gemini-2.5-pro"` so artefacts can
+  - expose `provider_id` like `"gemini:gemini-3.5-flash"` so artefacts can
     record provenance.
 """
 

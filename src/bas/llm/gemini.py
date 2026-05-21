@@ -29,7 +29,7 @@ from .base import (
 
 T = TypeVar("T", bound=BaseModel)
 
-# Heuristic prompt for the classifier model.
+# Heuristic prompt for the classifier model for web evidence grounding.
 _DEPTH_CLASSIFIER_PROMPT = (
     "Classify how much fresh web evidence is needed to answer the following request. "
     "Reply with exactly one lowercase token: skip, light, or deep.\n"
@@ -38,6 +38,55 @@ _DEPTH_CLASSIFIER_PROMPT = (
     "  deep  = multiple authoritative sources required (CVE details, vendor-specific TTPs)\n\n"
     "Request:\n{prompt}\n\nAnswer:"
 )
+
+
+# Keys in a JSON Schema that the Gemini Developer API rejects. They're either
+# Pydantic decoration (`title`, `$defs`) or Vertex-Enterprise-only features
+# (`additionalProperties`).
+_GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+    {"additionalProperties", "$defs", "definitions", "title", "default", "examples"}
+)
+
+
+def _sanitize_schema_for_gemini(node: Any) -> Any:
+    """Recursively strip keys Gemini Developer API rejects and inline ``$ref`` jumps.
+
+    Pydantic emits ``$defs`` + ``$ref`` for nested models; the SDK can handle
+    refs, so we keep those but copy ``$defs`` to a private slot used during
+    inlining, then drop the top-level copy on the way back up.
+    """
+    if isinstance(node, dict):
+        # First pass: harvest definitions so we can inline refs.
+        defs = node.get("$defs") or node.get("definitions") or {}
+
+        def _resolve(sub: Any) -> Any:
+            if isinstance(sub, dict):
+                # Inline `{"$ref": "#/$defs/Name"}` -> the actual subschema.
+                ref = sub.get("$ref")
+                if isinstance(ref, str) and ref.startswith("#/"):
+                    parts = ref.lstrip("#/").split("/")
+                    target: Any = {"$defs": defs, "definitions": defs}
+                    for p in parts:
+                        target = target.get(p, {}) if isinstance(target, dict) else {}
+                    return _resolve(target)
+                cleaned: dict[str, Any] = {}
+                for k, v in sub.items():
+                    if k in _GEMINI_UNSUPPORTED_SCHEMA_KEYS:
+                        continue
+                    cleaned[k] = _resolve(v)
+                # An object schema with no properties confuses Gemini; replace
+                # with a permissive `type=object` so the LLM can emit `{}`.
+                if cleaned.get("type") == "object" and "properties" not in cleaned:
+                    cleaned["properties"] = {}
+                return cleaned
+            if isinstance(sub, list):
+                return [_resolve(x) for x in sub]
+            return sub
+
+        return _resolve(node)
+    if isinstance(node, list):
+        return [_sanitize_schema_for_gemini(x) for x in node]
+    return node
 
 
 class GeminiProvider:
@@ -112,7 +161,10 @@ class GeminiProvider:
             # Structured-output mode is mutually exclusive with tools in the SDK;
             # callers should pass grounding="skip" when requesting JSON.
             kwargs["response_mime_type"] = "application/json"
-            kwargs["response_schema"] = response_schema
+           
+            kwargs["response_schema"] = _sanitize_schema_for_gemini(
+                response_schema.model_json_schema()
+            )
         return types.GenerateContentConfig(**kwargs)
 
     def _to_contents(self, messages: list[LLMMessage]) -> list[Any]:

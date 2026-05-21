@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Environment  (inferred; OpenAPI exposes only Create/Update bodies)
@@ -20,9 +20,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EnvironmentResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # populate_by_name lets us read either the alias (BAS payload key) or the
+    # canonical field name; extra='allow' keeps unknown keys intact.
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    environment_id: UUID | None = Field(default=None, alias="id")
+    environment_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("environment_id", "id", "_id", "uuid"),
+    )
     name: str | None = None
     environment_type: str | None = None
     risk_tolerance: str | None = None
@@ -71,9 +76,11 @@ class AbilityCreate(BaseModel):
 
 
 class AbilityResponse(AbilityCreate):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    ability_id: UUID = Field(alias="id")
+    ability_id: UUID = Field(
+        validation_alias=AliasChoices("ability_id", "id", "_id", "uuid"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -91,9 +98,11 @@ class AbilityStageCreate(BaseModel):
 
 
 class AbilityStageResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    stage_id: UUID
+    stage_id: UUID = Field(
+        validation_alias=AliasChoices("stage_id", "id", "_id", "uuid"),
+    )
     ability_id: UUID
     stage_name: str | None = None
     stage_order: int
@@ -119,8 +128,10 @@ class AdversaryCreate(BaseModel):
 
 
 class AdversaryResponse(AdversaryCreate):
-    model_config = ConfigDict(extra="allow")
-    adversary_id: UUID = Field(alias="id")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    adversary_id: UUID = Field(
+        validation_alias=AliasChoices("adversary_id", "id", "_id", "uuid"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +140,12 @@ class AdversaryResponse(AdversaryCreate):
 
 
 class PayloadMetadata(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    payload_id: UUID | None = Field(default=None, alias="id")
+    payload_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("payload_id", "id", "_id", "uuid"),
+    )
     name: str
     platform: str | None = None
     type: str | None = None
@@ -155,5 +169,5 @@ class GeneratedAbility(BaseModel):
     rationale: str
     grounding_depth: str  # "skip" | "light" | "deep"
     cited_urls: list[str] = Field(default_factory=list)
-    provider: str  # e.g. "gemini:gemini-2.5-pro"
+    provider: str  # e.g. "gemini:gemini-3.5-flash"
     extras: dict[str, Any] = Field(default_factory=dict)

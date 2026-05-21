@@ -9,6 +9,7 @@ Environment selection precedence (highest wins):
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 from uuid import UUID
@@ -17,6 +18,8 @@ from ..models import EnvironmentResponse
 from . import dry_run as _dry
 from .errors import BasClientError
 from .transport import HttpTransport
+
+logger = logging.getLogger(__name__)
 
 ENV_ID_VAR = "BAS_ENVIRONMENT_ID"
 ENV_NAME_VAR = "BAS_ENVIRONMENT_NAME"
@@ -33,7 +36,26 @@ class EnvironmentsApi:
         if self._dry:
             return _dry.fake_environments()
         data = self._t.get_json("/environments")
-        return [EnvironmentResponse.model_validate(x) for x in self._t.unwrap_list(data)]
+        items = self._t.unwrap_list(data)
+        parsed = [EnvironmentResponse.model_validate(x) for x in items]
+        # Surface key-mismatch fast: if our model couldn't pick up an id from
+        # any of its accepted aliases, the backend is using an unknown key.
+        for raw, env in zip(items, parsed):
+            if env.environment_id is None:
+                keys = sorted(raw.keys()) if isinstance(raw, dict) else type(raw).__name__
+                raise BasClientError(
+                    "GET",
+                    "/environments",
+                    200,
+                    f"environment entry has no recognised id field; got keys={keys}. "
+                    f"Expected one of: id, environment_id, _id, uuid.",
+                )
+        logger.info(
+            "[bas] received %d environment(s): %s",
+            len(parsed),
+            ", ".join(f"{e.environment_id}({e.name!r})" for e in parsed) or "<none>",
+        )
+        return parsed
 
     # ---- selection -----------------------------------------------------------
 
@@ -83,12 +105,18 @@ class EnvironmentsApi:
 
 
 def _find_by_id(envs: list[EnvironmentResponse], wanted: UUID | str) -> EnvironmentResponse:
-    target = str(wanted)
+    target = str(wanted).strip().lower()
     for e in envs:
-        if e.environment_id is not None and str(e.environment_id) == target:
+        if e.environment_id is not None and str(e.environment_id).lower() == target:
             return e
+    available = ", ".join(
+        f"{e.environment_id}({e.name!r})" for e in envs if e.environment_id is not None
+    ) or "<none>"
     raise BasClientError(
-        "GET", "/environments", 200, f"environment id not found: {target}"
+        "GET",
+        "/environments",
+        200,
+        f"environment id not found: {wanted!r}; available: {available}",
     )
 
 

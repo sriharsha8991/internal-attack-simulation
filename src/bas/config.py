@@ -108,8 +108,8 @@ class GroundingConfig(StrictModel):
 
 class LlmConfig(StrictModel):
     provider: str = "gemini"
-    model: str = "gemini-2.5-pro"
-    classifier_model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.5-flash"
+    classifier_model: str = "gemini-3.5-flash"
     api_key_env: str = "GEMINI_API_KEY"
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     grounding: GroundingConfig = Field(default_factory=GroundingConfig)
