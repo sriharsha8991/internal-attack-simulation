@@ -1,0 +1,33 @@
+{
+  "ability_id": "f9fa1b8d-2acb-4240-9b5f-7cfd3cc8b886",
+  "skill": "discovering-environment",
+  "saved_at": "2026-05-21T09:15:21.666640+00:00",
+  "ability": {
+    "name": "Service and Port Enumeration",
+    "description": "Scans the top 1000 TCP ports on discovered live hosts to identify active services.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "information-disclosure",
+    "default_severity": "medium",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "network"
+    ],
+    "created_by": "ai"
+  },
+  "stages": [
+    {
+      "stage_name": "Run Nmap Service Scan",
+      "stage_order": 1,
+      "executor": "cmd",
+      "command_template": "if not exist C:\\Windows\\Temp\\bas mkdir C:\\Windows\\Temp\\bas && powershell -Command \"if (Test-Path 'C:\\Windows\\Temp\\bas\\nmap_hostsweep.gnmap') { $ips = Get-Content 'C:\\Windows\\Temp\\bas\\nmap_hostsweep.gnmap' | Where-Object { $_ -match 'Host: ([0-9.]+)' } | ForEach-Object { $Matches[1] } | Select-Object -Unique; if ($ips) { Set-Content -Path 'C:\\Windows\\Temp\\bas\\live_hosts.txt' -Value $ips } else { Set-Content -Path 'C:\\Windows\\Temp\\bas\\live_hosts.txt' -Value '192.168.187.161' } } else { Set-Content -Path 'C:\\Windows\\Temp\\bas\\live_hosts.txt' -Value '192.168.187.161' }\" && nmap -sT -sV -Pn --top-ports 1000 --version-intensity 5 -oA C:\\Windows\\Temp\\bas\\nmap_services -iL C:\\Windows\\Temp\\bas\\live_hosts.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Performs service and version detection on the discovered live hosts to identify potential targets and domain controllers.",
+  "provider": "ai",
+  "cited_urls": []
+}

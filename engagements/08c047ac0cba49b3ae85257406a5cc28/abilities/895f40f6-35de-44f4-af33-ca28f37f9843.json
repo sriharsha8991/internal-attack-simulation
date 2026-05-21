@@ -1,0 +1,33 @@
+{
+  "ability_id": "895f40f6-35de-44f4-af33-ca28f37f9843",
+  "skill": "discovering-environment",
+  "saved_at": "2026-05-21T09:15:15.812026+00:00",
+  "ability": {
+    "name": "Determine Local Network Range",
+    "description": "Discovers the local network configuration and routing table to identify the primary subnet.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1016",
+    "platform": "windows",
+    "impact_type": "information-disclosure",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "network"
+    ],
+    "created_by": "ai"
+  },
+  "stages": [
+    {
+      "stage_name": "Run ipconfig and route print",
+      "stage_order": 1,
+      "executor": "cmd",
+      "command_template": "if not exist C:\\Windows\\Temp\\bas mkdir C:\\Windows\\Temp\\bas && ipconfig /all > C:\\Windows\\Temp\\bas\\ipconfig.txt && route print -4 >> C:\\Windows\\Temp\\bas\\ipconfig.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Determines the local network range and gateway configuration to establish the target subnet for scanning.",
+  "provider": "ai",
+  "cited_urls": []
+}

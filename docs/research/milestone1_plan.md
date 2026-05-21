@@ -54,7 +54,7 @@ config/
 
 ```yaml
 provider: gemini                   # gemini | anthropic | openai
-model: gemini-2.5-pro              # provider-specific
+model: gemini-3.5-flash              # provider-specific
 classifier_model: gemini-2.5-flash # cheap model for skip/light/deep decision
 temperature: 0.2
 grounding:
@@ -116,7 +116,7 @@ Provider mapping:
 
 | Provider | Generation model | Grounding tool |
 |---|---|---|
-| Gemini (M1) | `gemini-2.5-pro` | `tools=[{"google_search": {}}]` |
+| Gemini (M1) | `gemini-3.5-flash` | `tools=[{"google_search": {}}]` |
 | Anthropic (future) | `claude-sonnet-4` (or current) | `web_search_20250305` tool |
 | OpenAI (future) | `gpt-4.1` / `o-series` | `web_search_preview` tool |
 

@@ -1,258 +1,178 @@
-# Discovery — Tool commands reference
+# Discovery — tool commands reference
 
-Templated commands the `DiscoveryAgent` renders and dispatches via the
-Execution Layer. Placeholders:
+Concrete, copy-pasteable commands for each step of `SKILL.md`. The planner
+must produce `command_template` strings that look like these — same flags,
+same outputs, just with the placeholders substituted from `foothold` or
+session memory.
 
-- `{{ memory.path.dots }}` — resolved against typed session memory.
-- `{{ artifact.path }}` — allocated by the ToolRunner per step.
-- Filter pipes (`| as_cme_secret`, `| as_impacket_secret`, `| ips`) implemented
-  in the agent runtime; see `src/execution/template_filters.py`.
+## Step 1 — Determine local network range
 
-## Contents
-- sharphound, bloodhound-python (D1)
-- certipy (D3)
-- powerview (D2, D6, D9, D10, D15, D16)
-- crackmapexec (D4, D5, D8, D11)
-- kerbrute, impacket-getuserspns (D9)
-- snaffler (D4), adidnsdump (D13), group3r (D10)
-- nmap (D8) — only when masscan-pre-scoped
-- roadrecon / azurehound (D14)
-- powerupsql, lapstoolkit (D17, D20)
+### Windows (`cmd`)
 
----
-
-## `sharphound`  (D1)
-
-```yaml
-tool: sharphound
-opsec: moderate
-preconditions:
-  - "credentials.any(usable_for contains 'ldap')"
-commands:
-  - id: full_collection
-    cmd: |
-      SharpHound.exe -c All -d {{ context.scope.domains[0] }} \
-        --zipfilename {{ artifact.path }}/sh.zip \
-        --randomizefilenames --prettyprint
-    expected_artifacts: ["sh*.zip"]
-    parser: parsers.sharphound
-    on_success:
-      - "ingest into ad_graph"
-      - "append finding: technique=bloodhound_collection priority=critical"
-    on_failure:
-      fallback: stealth_collection
-  - id: stealth_collection
-    cmd: |
-      SharpHound.exe -c DCOnly --stealth -d {{ context.scope.domains[0] }} \
-        --zipfilename {{ artifact.path }}/sh.zip
-    parser: parsers.sharphound
+```
+ipconfig /all
 ```
 
-## `bloodhound-python`  (D1 fallback)
-
-```yaml
-tool: bloodhound-python
-opsec: moderate
-preconditions:
-  - "credentials.any(secret_type in ['password','nt_hash'])"
-commands:
-  - id: linux_full
-    cmd: |
-      bloodhound-python -u {{ creds.primary.username }} \
-        {{ creds.primary | as_auth_flag }} \
-        -d {{ context.scope.domains[0] }} \
-        -ns {{ hosts.first(role='DC').ip }} \
-        -c All --zip
-    expected_artifacts: ["*_bloodhound.zip"]
-    parser: parsers.sharphound
+```
+route print -4
 ```
 
-## `certipy`  (D3)
+### Linux / macOS (`sh`)
 
-```yaml
-tool: certipy
-opsec: stealth
-commands:
-  - id: find_vulnerable
-    cmd: |
-      certipy find -u '{{ creds.primary.username }}@{{ context.scope.domains[0] }}' \
-        {{ creds.primary | as_certipy_secret }} \
-        -dc-ip {{ hosts.first(role='DC').ip }} \
-        -vulnerable -enabled -stdout
-    parser: parsers.certipy
-    on_success:
-      - "append findings per ESC id"
-      - "set pivot hint to escalating-privileges if ESC1/4/6/8 present"
+```
+ip -o -4 addr show
 ```
 
-## `powerview`  (D2, D6, D9, D10, D15, D16)
-
-```yaml
-tool: powerview
-opsec: moderate
-notes: "Load via in-memory IEX after AMSI bypass; never drop to disk."
-commands:
-  - id: kerberoastable
-    cmd: "Get-DomainUser -SPN -Properties samaccountname,serviceprincipalname,pwdlastset | ConvertTo-Json -Depth 3"
-    parser: parsers.powerview_json
-  - id: asreproastable
-    cmd: "Get-DomainUser -PreauthNotRequired -Properties samaccountname,pwdlastset | ConvertTo-Json -Depth 3"
-    parser: parsers.powerview_json
-  - id: password_policy
-    cmd: "Get-DomainPolicyData | ConvertTo-Json -Depth 4"
-    parser: parsers.powerview_json
-  - id: unconstrained_delegation
-    cmd: "Get-DomainComputer -Unconstrained | Select samaccountname,operatingsystem | ConvertTo-Json"
-    parser: parsers.powerview_json
-  - id: gpo_writable
-    cmd: "Get-DomainGPO | Get-DomainObjectAcl -ResolveGUIDs | Where-Object {$_.ActiveDirectoryRights -match 'Write|GenericAll'} | ConvertTo-Json -Depth 3"
-    parser: parsers.powerview_json
-  - id: object_acl
-    cmd: "Get-DomainObjectAcl -ResolveGUIDs -Identity '{{ target.distinguished_name }}' | ConvertTo-Json -Depth 3"
-    parser: parsers.powerview_json
+```
+ip route
 ```
 
-## `crackmapexec`  (D4, D5, D8, D11)
+Parse the primary adapter's `IPv4 Address` + `Subnet Mask` (Windows) or
+`inet a.b.c.d/NN` (Linux) into a CIDR. Store as `network.cidr`.
 
-```yaml
-tool: crackmapexec
-opsec: moderate
-commands:
-  - id: smb_sweep
-    cmd: |
-      crackmapexec smb {{ context.scope.subnets_allow[0] }} \
-        -u {{ creds.primary.username }} {{ creds.primary | as_cme_secret }} \
-        --json
-    parser: parsers.cme
-    on_success: ["populate hosts[] with os, signing, smbv1 flags"]
-  - id: loggedon_users
-    cmd: |
-      crackmapexec smb {{ hosts | ips }} \
-        -u {{ creds.primary.username }} {{ creds.primary | as_cme_secret }} \
-        --loggedon-users --json
-    parser: parsers.cme
-  - id: shares
-    cmd: |
-      crackmapexec smb {{ hosts | ips }} \
-        -u {{ creds.primary.username }} {{ creds.primary | as_cme_secret }} \
-        --shares --json
-    parser: parsers.cme
+## Step 2 — Confirm nmap is installed
+
+### Windows (`cmd`)
+
+```
+nmap --version
 ```
 
-## `kerbrute`  (D9)
+Fallback presence check (in the same stage, chained with `||`):
 
-```yaml
-tool: kerbrute
-opsec: stealth
-commands:
-  - id: user_enum
-    cmd: |
-      kerbrute userenum --dc {{ hosts.first(role='DC').ip }} \
-        -d {{ context.scope.domains[0] }} \
-        {{ artifact.path }}/userlist.txt
-    parser: parsers.kerbrute
+```
+where nmap
 ```
 
-## `impacket-getuserspns`  (D9)
+### Linux / macOS (`sh`)
 
-```yaml
-tool: impacket-getuserspns
-opsec: stealth
-commands:
-  - id: roast
-    cmd: |
-      GetUserSPNs.py {{ context.scope.domains[0] }}/{{ creds.primary.username }} \
-        {{ creds.primary | as_impacket_secret }} \
-        -dc-ip {{ hosts.first(role='DC').ip }} \
-        -request -outputfile {{ artifact.path }}/spn_hashes.txt
-    parser: parsers.kerberoast_hashes
-    on_success:
-      - "store hashes as credentials[] with secret_type=krb5tgs"
-      - "pivot hint = accessing-credentials (kerberoast_offline_crack)"
+```
+nmap --version
 ```
 
-## `snaffler`  (D4)
+Fallback:
 
-```yaml
-tool: snaffler
-opsec: moderate
-commands:
-  - id: scan_shares
-    cmd: "Snaffler.exe -s -y -o {{ artifact.path }}/snaffler.tsv"
-    parser: parsers.snaffler
-    on_success: ["append findings per high-severity hit (passwords, certs, kdbx)"]
+```
+command -v nmap
 ```
 
-## `adidnsdump`  (D13)
+A non-zero exit on both means `recon.nmap_available = false` → trigger Step 3.
 
-```yaml
-tool: adidnsdump
-opsec: stealth
-commands:
-  - id: dump
-    cmd: |
-      adidnsdump -u '{{ context.scope.domains[0] }}\{{ creds.primary.username }}' \
-        {{ creds.primary | as_adidnsdump_secret }} \
-        {{ hosts.first(role='DC').ip }} -r --print-zones
-    parser: parsers.adidnsdump
+## Step 3 — Install nmap (only if missing)
+
+### Windows (`cmd`, admin)
+
+```
+winget install -e --id Insecure.Nmap --silent --accept-package-agreements --accept-source-agreements && nmap --version
 ```
 
-## `group3r`  (D10)
+Chocolatey fallback:
 
-```yaml
-tool: group3r
-opsec: stealth
-commands:
-  - id: audit
-    cmd: "Group3r.exe -f {{ artifact.path }}/group3r.log -s"
-    parser: parsers.group3r
+```
+choco install nmap -y && nmap --version
 ```
 
-## `nmap`  (D8 — only when masscan-pre-scoped)
+### Debian / Ubuntu (`sh`)
 
-```yaml
-tool: nmap
-opsec: loud
-commands:
-  - id: dc_services
-    cmd: |
-      nmap -Pn -n -sS -p 53,88,135,139,389,445,464,636,3268,3269,5985 \
-        --open -oX {{ artifact.path }}/nmap.xml \
-        {{ context.scope.subnets_allow | join(' ') }}
-    parser: parsers.nmap_xml
-    opsec_gate: "block if opsec_state.edr_hot"
+```
+sudo apt-get update && sudo apt-get install -y nmap && nmap --version
 ```
 
-## `roadrecon` / `azurehound`  (D14 — hybrid only)
+### RHEL / CentOS / Fedora (`sh`)
 
-```yaml
-tool: roadrecon
-opsec: stealth
-preconditions:
-  - "context.scope.azure_tenant is not null"
-commands:
-  - id: gather
-    cmd: |
-      roadrecon auth --username {{ creds.primary.username }}@{{ context.scope.azure_tenant }} \
-        --password '{{ creds.primary | as_plaintext }}' && \
-      roadrecon gather -f {{ artifact.path }}/roadrecon.db
-    parser: parsers.roadtools
+```
+sudo dnf install -y nmap && nmap --version
 ```
 
-## `powerupsql`  (D17) / `lapstoolkit`  (D20)
+### macOS (`sh`)
 
-```yaml
-tool: powerupsql
-opsec: moderate
-commands:
-  - id: instance_discovery
-    cmd: "Get-SQLInstanceDomain | Get-SQLServerInfo | ConvertTo-Json"
-    parser: parsers.json
-
-tool: lapstoolkit
-opsec: stealth
-commands:
-  - id: find_readers
-    cmd: "Find-LAPSDelegatedGroups | ConvertTo-Json; Get-LAPSComputers | ConvertTo-Json"
-    parser: parsers.json
 ```
+brew install nmap && nmap --version
+```
+
+If none of the package managers is reachable, fail this ability and emit
+`recommended_next = blocked`.
+
+## Step 4 — Host discovery sweep
+
+Substitute `<CIDR>` with `network.cidr` from Step 1 (e.g. `192.168.1.0/24`)
+and `<ARTIFACTS>` with the per-stage artifact directory.
+
+### Windows (`cmd`) and Linux/macOS (`sh`) — identical nmap invocation
+
+```
+nmap -sn -PE -PP -PS21,22,80,443,445,3389 -PA80,443,3389 -oA <ARTIFACTS>/nmap_hostsweep <CIDR>
+```
+
+Parse the resulting `.gnmap` for `Status: Up` lines. Persist each IP (plus
+reverse-DNS hostname where present) into `network.live_hosts`.
+
+If the sweep returns zero hosts, re-run **once** with `-PR` (ARP) on the
+same subnet before giving up; many environments drop ICMP at the host
+firewall.
+
+## Step 5 — Service / port enumeration
+
+Substitute `<LIVE_HOSTS_FILE>` with a one-IP-per-line file built from
+`network.live_hosts` (a small `printf` / `Set-Content` stage just before this
+one is acceptable if needed).
+
+```
+nmap -sS -sV -Pn --top-ports 1000 --version-intensity 5 -oA <ARTIFACTS>/nmap_services -iL <LIVE_HOSTS_FILE>
+```
+
+Flag breakdown — keep all of them:
+
+- `-sS` SYN scan (fast, low footprint when run as root/Administrator).
+  Non-privileged shells should substitute `-sT` (TCP connect).
+- `-sV` service + version detection (mandatory).
+- `-Pn` don't re-ping (Step 4 already filtered to live hosts).
+- `--top-ports 1000` good coverage without scanning all 65535.
+- `--version-intensity 5` default; raise to 7 if you specifically need
+  banners on a stubborn service, do **not** go to 9 on a full sweep.
+
+Persist each `(host, port, proto, service, product, version)` row into
+`network.services`.
+
+## Step 6 — Targeted deepening
+
+Run one ability per high-value port. Pick the matching template; never
+broaden the port list.
+
+| Port | Service     | Template                                                                  |
+|------|-------------|---------------------------------------------------------------------------|
+| 445  | SMB         | `nmap -p445 --script smb-os-discovery,smb2-security-mode <IP>`            |
+| 88   | Kerberos    | `nmap -p88 -sV <IP>`                                                       |
+| 389  | LDAP        | `nmap -p389 --script ldap-rootdse <IP>`                                    |
+| 636  | LDAPS       | `nmap -p636 --script ldap-rootdse,ssl-cert <IP>`                           |
+| 3389 | RDP         | `nmap -p3389 --script rdp-enum-encryption,rdp-ntlm-info <IP>`              |
+| 80   | HTTP        | `nmap -p80 --script http-title,http-server-header,http-methods <IP>`       |
+| 443  | HTTPS       | `nmap -p443 --script http-title,http-server-header,ssl-cert <IP>`          |
+| 22   | SSH         | `nmap -p22 --script ssh2-enum-algos,ssh-hostkey <IP>`                      |
+| 3306 | MySQL       | `nmap -p3306 --script mysql-info <IP>`                                     |
+| 1433 | MSSQL       | `nmap -p1433 --script ms-sql-info,ms-sql-ntlm-info <IP>`                   |
+
+Persist the script output under `network.fingerprints.<IP>.<PORT>`.
+
+## Step 7 — AD pivot probes (gated)
+
+Only emit these abilities if Step 7's gate condition (see SKILL.md) is met.
+They are unauthenticated and lightweight; deeper enumeration is the next
+skill's job.
+
+```
+crackmapexec smb <DC_IP>
+```
+
+```
+ldapsearch -x -H ldap://<DC_IP> -s base -b "" namingContexts defaultNamingContext
+```
+
+```
+enum4linux-ng -A <DC_IP>
+```
+
+Persist the discovered domain name, NetBIOS name, naming contexts, and
+`signing required` flag under `identity.domain`. Then set
+`network.has_domain_controller = true` and emit `recommended_next` per the
+SKILL.md pivot table.
