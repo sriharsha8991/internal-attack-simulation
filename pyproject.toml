@@ -11,11 +11,14 @@ dependencies = [
     "google-genai>=0.3",
     "langgraph>=0.2",
     "langchain-core>=0.3",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.39"]
 openai = ["openai>=1.40"]
+studio = ["langgraph-cli[inmem]>=0.1.60"]
 
 [project.scripts]
 bas = "bas.cli:app"

@@ -1,0 +1,36 @@
+# Local-only artefacts
+.venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build / cache
+dist/
+build/
+*.egg-info/
+
+# Engagement artefacts (mounted as a volume, not baked into the image)
+engagements/
+runs/
+checkpoints.db*
+
+# VCS + docs not needed at runtime
+.git/
+.github/
+README.md
+*.md
+!docs/**
+
+# Tests
+tests/

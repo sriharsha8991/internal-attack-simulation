@@ -21,8 +21,8 @@ bas:
 
 llm:
   provider: gemini                       # gemini | anthropic | openai
-  model: gemini-2.5-pro
-  classifier_model: gemini-2.5-flash     # cheap model for grounding-depth routing
+  model: gemini-3.5-flash
+  classifier_model: gemini-3.5-flash     # cheap model for grounding-depth routing
   api_key_env: GEMINI_API_KEY            # name of env var holding the key
   temperature: 0.2
   grounding:

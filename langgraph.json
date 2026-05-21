@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "bas_orchestrator": "bas.graph_server:graph"
+  },
+  "env": ".env"
+}

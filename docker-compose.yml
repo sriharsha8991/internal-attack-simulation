@@ -1,0 +1,53 @@
+services:
+  bas-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bas-orchestrator:latest
+    container_name: bas-api
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    env_file:
+      - .env
+    environment:
+      BAS_ENGAGEMENTS_DIR: /data/engagements
+      # Override defaults from config.yaml here without rebuilding the image.
+      # BAS_BASE_URL: http://pelorushub.online:31763
+      # BAS_DRY_RUN: "false"
+      # GEMINI_API_KEY: ...
+    volumes:
+      # Engagement artefacts (one JSON file per engagement) survive container restarts.
+      - ./engagements:/data/engagements
+      # Hot-reload skills/config without rebuilding (comment out for prod).
+      - ./skills:/app/skills:ro
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+# --- M2 placeholders (uncomment when migrating to queue-backed persistence) ---
+#  redis:
+#    image: redis:7-alpine
+#    container_name: bas-redis
+#    restart: unless-stopped
+#    volumes:
+#      - redis-data:/data
+#
+#  worker:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    image: bas-orchestrator:latest
+#    container_name: bas-worker
+#    depends_on: [redis]
+#    env_file: [.env]
+#    command: ["celery", "-A", "bas.tasks", "worker", "--loglevel=info"]
+#    volumes:
+#      - ./engagements:/data/engagements
+#
+# volumes:
+#   redis-data:
