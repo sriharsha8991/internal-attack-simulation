@@ -134,6 +134,41 @@ def _phase_history_compact(
     return result
 
 
+def _extract_prior_issues(state: "SessionState") -> list:
+    """Pull StageIssue objects from the last execution for the current phase.
+
+    Reconstructs issues from the stored result JSON via the parser. Falls back
+    to an empty list if no results are available yet.
+    """
+    phase = state.get("current_phase") or ""
+    asset_map = (state.get("phase_asset_map") or {}).get(phase, {})
+    stage_id_map = asset_map.get("stage_id_map", {})
+
+    # Get the last execution_outcome from phase_history
+    history = state.get("phase_history") or []
+    op_id: str | None = None
+    for entry in reversed(history):
+        outcome = entry.get("execution_outcome") or {}
+        if outcome.get("operation_id"):
+            op_id = outcome["operation_id"]
+            break
+
+    if not op_id:
+        return []
+
+    results_dir = state.get("results_dir")
+    if not results_dir:
+        return []
+
+    from ..tools.master_tools import _load_and_parse
+
+    _, op_result = _load_and_parse(results_dir, op_id)
+    if op_result is None:
+        return []
+
+    return detect_issues(op_result, stage_id_map)
+
+
 def _skill_data_from_push(
     skill_name: str,
     push: "PushResult",
@@ -448,6 +483,7 @@ def _master_pick_phase(
             completed_phases=completed,
             phase_history=list(state.get("phase_history") or []),
             attempt=attempt,
+            execution_summary=state.get("execution_summary"),
         )
     except Exception as exc:  # noqa: BLE001
         msg = f"[master_plan/pick] master crashed: {exc!r}; halting"
@@ -525,6 +561,8 @@ def _master_pick_phase(
         "master_revisions_used": 0,
         "master_revision_feedback": "",
         "master_done": False,           # explicit: we just picked a phase
+        "retry_same_phase": briefing.retry_same_phase,
+        "issues_to_fix": briefing.issues_to_fix,
         "planner_attempts": 0,
         "planner_tool_calls": 0,
         "current_plan": None,
@@ -838,6 +876,60 @@ def _make_push_node(
 
         plan = SpecialistPlan.model_validate(raw_plan)
 
+        # ---- retry detection (Phase 7) -------------------------------------
+        # If the master flagged retry_same_phase AND we have prior asset_map
+        # for this phase, send feedback to fix failed stages instead of
+        # creating new abilities/adversaries.
+        completed_phases = list(state.get("completed_phases") or [])
+        prior_asset_map = (state.get("phase_asset_map") or {}).get(phase)
+        is_retry = (
+            prior_asset_map is not None
+            and phase not in completed_phases
+            and bool(state.get("retry_same_phase"))
+        )
+
+        if is_retry:
+            _log_step("PUSH", f"→ RETRY PATH  phase={phase!r}", level="info")
+            op_id = prior_asset_map.get("operation_id", "")
+            prior_issues = _extract_prior_issues(state)
+
+            changes = master.build_feedback_payload(
+                issues=prior_issues,
+                current_plan=plan,
+                asset_map=prior_asset_map,
+                operation_id=op_id,
+            )
+            if changes:
+                bas.feedback.send(operation_id=op_id, changes=changes)
+                log.append(
+                    f"[push] RETRY phase={phase} sent {len(changes)} "
+                    f"feedback corrections for op={op_id}"
+                )
+            else:
+                log.append(
+                    f"[push] RETRY phase={phase} no corrections to send — "
+                    f"re-running same operation op={op_id}"
+                )
+
+            _log_step(
+                "PUSH",
+                f"→ RETRY feedback={len(changes)} changes  op={op_id}",
+            )
+            # Return minimal update — no new IDs, keep existing asset_map
+            return {
+                "stage_results": list(state.get("stage_results") or []),
+                "retry_same_phase": False,  # consumed
+                "issues_to_fix": [],
+                # reset planning state so next cycle starts clean
+                "current_plan": None,
+                "current_plan_summary": [],
+                "current_plan_error": None,
+                "master_revision_feedback": "",
+                "evaluator_action": "",
+                "feedback": "",
+                "log": log,
+            }
+
         push: PushResult = push_specialist(
             state,
             plan=plan,
@@ -1062,6 +1154,13 @@ def _make_analyse_results_node(master: MasterPolicy):
         _log_step("ANALYSE", "pausing graph — awaiting backend results")
         result_data = interrupt("awaiting_results")
 
+        # Handle timeout resume — no results to analyse
+        if isinstance(result_data, dict) and result_data.get("timeout"):
+            log = list(state.get("log") or [])
+            log.append("[analyse_results] timeout — proceeding without results")
+            _log_step("ANALYSE", "→ TIMEOUT — keeping pending.* as unverified")
+            return {"log": log}
+
         # 1. Parse + issue detection
         op_result = parse_operation_result(result_data)
         phase = state.get("current_phase") or ""
@@ -1111,7 +1210,14 @@ def _make_analyse_results_node(master: MasterPolicy):
         # 4. Phase done decision
         phase_done = _derive_phase_done(op_result, issues)
 
-        # 5. Update phase_history entry with execution_outcome
+        # 5. Store operation_id from backend into phase_asset_map (Phase 7)
+        updated_asset_map = dict(state.get("phase_asset_map") or {})
+        if phase and phase in updated_asset_map:
+            phase_entry = dict(updated_asset_map[phase])
+            phase_entry["operation_id"] = op_result.operation_id
+            updated_asset_map[phase] = phase_entry
+
+        # 6. Update phase_history entry with execution_outcome
         history = list(state.get("phase_history") or [])
         if history:
             last = dict(history[-1])
@@ -1147,6 +1253,7 @@ def _make_analyse_results_node(master: MasterPolicy):
             "phase_history": history,
             "completed_phases": completed_phases if phase_done else state.get("completed_phases"),
             "execution_summary": summary,
+            "phase_asset_map": updated_asset_map,
             "pending_operation_id": None,
             "log": log,
         }

@@ -13,6 +13,7 @@ Internal modules:
     payloads        /payloads
     abilities       /abilities + /abilities/{id}/stages
     adversaries     /adversaries + /adversaries/{aid}/abilities/{abid}
+    feedback        POST /ai/operation-feedback
     facade          BasClient — composes the resource clients
 """
 

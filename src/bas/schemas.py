@@ -71,9 +71,10 @@ class EngagementSubmitResponse(BaseModel):
 
 class EngagementSummary(BaseModel):
     engagement_id: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: Literal["queued", "running", "awaiting_results", "completed", "failed"]
     started_at: datetime
     finished_at: datetime | None
+    awaiting_since: datetime | None = None
     iterations: int
     completed_stages: list[str]
     error: str | None = None

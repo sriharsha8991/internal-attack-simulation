@@ -71,6 +71,18 @@ class PhaseBriefing(BaseModel):
             "or no productive next phase). When true, the orchestrator halts."
         ),
     )
+    retry_same_phase: bool = Field(
+        default=False,
+        description="True when retrying a phase that previously failed with fixable issues.",
+    )
+    retry_reason: str = Field(
+        default="",
+        description="Why this phase is being retried (tool missing, placeholder, timeout).",
+    )
+    issues_to_fix: list[str] = Field(
+        default_factory=list,
+        description="Specific issue descriptions the planner must address on retry.",
+    )
 
 
 CommitAction = Literal["commit", "revise"]
@@ -150,11 +162,22 @@ _MASTER_PLAN_PROMPT = (
     "    completed, set `done=true` and leave `phase` as the empty string.\n"
     "  * The objective is one sentence. Constraints reference the foothold\n"
     "    (platform, IP) and known scope.\n"
-    "  * Open questions are concrete intel gaps phrased as questions the\n"
-    "    planner can answer with commands.\n"
+    "    * Open questions are concrete intel gaps phrased as questions the\n"
+    "      planner can answer with commands.\n"
     "  * When writing constraints, include relevant data from phase_history\n"
     "    (e.g. discovered CIDRs, live hosts, creds obtained) so the planner\n"
     "    can reference them directly in commands.\n"
+    "\n"
+    "RETRY CONTEXT\n"
+    "  If `execution_summary` is provided, you are re-planning after actual\n"
+    "  execution results. Analyse the summary:\n"
+    "    * If critical objectives were NOT met but the cause is fixable\n"
+    "      (tool missing, placeholder token, timeout), set retry_same_phase=true\n"
+    "      and list the specific issues in issues_to_fix.\n"
+    "    * If objectives WERE met or the phase is unachievable, set done=true\n"
+    "      or pick a different phase.\n"
+    "    * Never retry the same phase more than 2 times — check phase_history\n"
+    "      for how many times the current phase appears with execution_outcome.\n"
 )
 
 
@@ -257,6 +280,7 @@ class MasterPolicy(Protocol):
         completed_phases: list[str],
         phase_history: list[dict],
         attempt: int,
+        execution_summary: str | None = None,
     ) -> PhaseBriefing: ...
 
     def review_plan(
@@ -286,6 +310,15 @@ class MasterPolicy(Protocol):
         current_memory: dict,
     ) -> MemoryUpdate: ...
 
+    def build_feedback_payload(
+        self,
+        *,
+        issues: list,
+        current_plan: Any,
+        asset_map: dict,
+        operation_id: str,
+    ) -> list: ...
+
 
 class LLMMasterRouter:
     """Default master router. Three LLM round-trips per phase (plan, review,
@@ -304,6 +337,7 @@ class LLMMasterRouter:
         completed_phases: list[str],
         phase_history: list[dict],
         attempt: int,
+        execution_summary: str | None = None,
     ) -> PhaseBriefing:
         payload = {
             "foothold": foothold,
@@ -313,6 +347,8 @@ class LLMMasterRouter:
             "phase_history": phase_history,
             "attempt": attempt,
         }
+        if execution_summary:
+            payload["execution_summary"] = execution_summary
         msgs = [
             LLMMessage(role="system", content=_MASTER_PLAN_PROMPT),
             LLMMessage(
@@ -451,11 +487,10 @@ class LLMMasterRouter:
         if not detailed_output and results_dir:
             # Fallback: grab output for ALL abilities (first 5)
             from ..results import parse_operation_result
-            from ..tools.master_tools import _load_result
+            from ..tools.master_tools import _load_and_parse
 
-            raw = _load_result(results_dir, operation_id)
-            if raw:
-                op = parse_operation_result(raw)
+            _, op = _load_and_parse(results_dir, operation_id)
+            if op:
                 parts = []
                 for ab in op.abilities[:5]:
                     out = read_stage_output(results_dir, operation_id, ab.name)
@@ -479,6 +514,65 @@ class LLMMasterRouter:
             extract_msgs, MemoryUpdate, grounding="skip", temperature=0.0
         )
 
+    def build_feedback_payload(
+        self,
+        *,
+        issues: list,
+        current_plan: Any,
+        asset_map: dict,
+        operation_id: str,
+    ) -> list:
+        """Build a list of AIStageChange dicts for failed stages.
+
+        For each issue, look up the corrected command from the new plan and
+        pair it with the original stage_id from the asset_map.
+        """
+        from ..client.feedback import AIStageChange
+
+        stage_id_map = asset_map.get("stage_id_map", {})
+        ability_name_to_id = asset_map.get("ability_name_to_id", {})
+
+        # Build lookup: {(ability_name, stage_name) -> new_command} from plan
+        new_commands: dict[tuple[str, str], str] = {}
+        for gen in current_plan.abilities:
+            for stage in gen.stages:
+                new_commands[(gen.ability.name, stage.stage_name)] = (
+                    stage.command_template or ""
+                )
+
+        changes: list[AIStageChange] = []
+        seen: set[tuple[str, str]] = set()  # (ability_name, stage_name)
+
+        for issue in issues:
+            key = (issue.ability_name, issue.stage_name)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            # Resolve original IDs
+            ab_id = ability_name_to_id.get(issue.ability_name, issue.ability_id)
+            sid = stage_id_map.get(issue.ability_name, {}).get(
+                issue.stage_name, issue.stage_id
+            )
+
+            new_cmd = new_commands.get(key)
+            if not new_cmd:
+                continue  # no corrected command in the new plan
+
+            changes.append(
+                AIStageChange(
+                    operation_id=operation_id,
+                    ability_id=ab_id,
+                    stage_id=sid,
+                    suggested_command_template=new_cmd,
+                    reason=f"{issue.kind.value}: {issue.detail[:200]}",
+                    confidence=0.9,
+                    apply_immediately=True,
+                )
+            )
+
+        return changes
+
 
 class StaticMasterRouter:
     """Deterministic master used in tests/dry-run.
@@ -496,6 +590,7 @@ class StaticMasterRouter:
         completed_phases: list[str],
         phase_history: list[dict],
         attempt: int,
+        execution_summary: str | None = None,
     ) -> PhaseBriefing:
         remaining = [p for p in available_phases if p not in completed_phases]
         if not remaining:
@@ -536,3 +631,13 @@ class StaticMasterRouter:
             facts={},
             narrative=f"static analysis of operation {operation_id}",
         )
+
+    def build_feedback_payload(
+        self,
+        *,
+        issues: list,
+        current_plan: Any,
+        asset_map: dict,
+        operation_id: str,
+    ) -> list:
+        return []  # static router never generates feedback
