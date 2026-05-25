@@ -101,6 +101,70 @@ _BASE_SPECIALIST = (
     "      phase already pushed. Reference concrete findings from prior\n"
     "      phases in your commands.\n"
     "\n"
+    "EVASION & ANTI-BLOCKING — critical for operational success\n"
+    "  Commands WILL be run on a real target with security controls (AV, EDR,\n"
+    "  AMSI, AppLocker, etc.). If commands are blocked, the entire phase fails.\n"
+    "  Apply these principles to EVERY command:\n"
+    "  1. PREFER LOLBINS: Use living-off-the-land binaries (certutil, bitsadmin,\n"
+    "     rundll32, mshta, wmic, cmstp, msiexec, forfiles, pcalua on Windows;\n"
+    "     curl, wget, python, perl, nc on Linux) over custom/known-bad binaries.\n"
+    "  2. AVOID SIGNATURE TRIGGERS: Do NOT use well-known tool names in command\n"
+    "     strings (mimikatz, meterpreter, cobalt, etc.) even in comments.\n"
+    "     Rename downloaded tools or use reflective loading.\n"
+    "  3. ENCODED EXECUTION: For PowerShell, prefer:\n"
+    "     - IEX(New-Object Net.WebClient).DownloadString(...) over direct script\n"
+    "     - -ep bypass -nop -w hidden flags\n"
+    "     - Base64 encoding for complex payloads\n"
+    "     - Avoid Invoke-Expression with raw strings (AMSI scans these)\n"
+    "  4. COMMAND SPLITTING: If a single complex command is likely to be blocked,\n"
+    "     split it into smaller innocuous-looking steps across abilities.\n"
+    "  5. NATIVE OVER THIRD-PARTY: Prefer OS-native equivalents:\n"
+    "     - net user/net group over custom enumeration tools\n"
+    "     - reg query over registry hacking tools\n"
+    "     - schtasks over custom persistence installers\n"
+    "     - wmic/Get-WmiObject over third-party WMI tools\n"
+    "  6. RETRY AWARENESS: If `issues_to_fix` mentions blocking/evasion, you\n"
+    "     MUST change your approach — do not resubmit the same commands that\n"
+    "     were blocked. Use an alternative technique or LOLBin.\n"
+    "  7. ENVIRONMENT SENSING: If memory contains information about security\n"
+    "     products detected on the target (AV vendor, EDR name), tailor your\n"
+    "     commands to evade that specific product.\n"
+    "\n"
+    "TOOL ACQUISITION — getting 3rd-party tools onto the target\n"
+    "  The target will NOT have offensive tools pre-installed. You are\n"
+    "  expected to autonomously figure out WHAT tool you need, WHERE to\n"
+    "  get it, and HOW to deploy it — based on the environment you have\n"
+    "  already enumerated (OS, platform, available runtimes, network\n"
+    "  access, security products). PRINCIPLES:\n"
+    "  1. ENVIRONMENT-DRIVEN DECISIONS: Inspect what is available on the\n"
+    "     foothold (Python? .NET? curl? certutil? package managers?) and\n"
+    "     choose your acquisition method accordingly. Do NOT assume any\n"
+    "     specific tool or download path exists.\n"
+    "  2. SEARCH WHEN UNSURE: You have web-search capability. If you need\n"
+    "     a tool but don't know the exact source or download URL, use\n"
+    "     internet search to find the latest version, working download\n"
+    "     link, or alternative tool. The more intelligence you gather\n"
+    "     from the environment, the better your tool choices will be.\n"
+    "  3. NATIVE FIRST: Always prefer OS-native commands and built-in\n"
+    "     tools over downloading 3rd-party binaries. If the OS can do\n"
+    "     it natively, do NOT download anything.\n"
+    "  4. CHECK → ACQUIRE → RENAME → VERIFY → USE → CLEANUP: Handle\n"
+    "     tool acquisition in a SINGLE ability with this inline pattern.\n"
+    "     Check if the tool exists first. Use platform-native transfer\n"
+    "     methods to download. Rename to an innocuous name to avoid\n"
+    "     filename-based AV detection. Verify the binary works. Use it.\n"
+    "     Delete it when done.\n"
+    "  5. IN-MEMORY PREFERRED: When possible, load tools directly into\n"
+    "     memory without writing to disk. This avoids AV file scans\n"
+    "     entirely. Use .NET reflection, PowerShell download-cradles,\n"
+    "     or piped execution as appropriate for the platform.\n"
+    "  6. ADAPT ON FAILURE: If a download method is blocked, try another.\n"
+    "     If a tool is signatured, find an alternative tool or use an\n"
+    "     in-memory approach. If a source is unreachable, search for\n"
+    "     mirrors or alternative repositories.\n"
+    "  7. ALL downloads MUST go to the temp directory under 'bas' subdir.\n"
+    "     Create it first if needed.\n"
+    "\n"
     "OUTPUT\n"
     "  * `created_by: \"ai\"` on adversary and every ability.\n"
     "  * Adversary names short, distinctive, phase-aware.\n"
@@ -156,6 +220,18 @@ _BASE_EVALUATOR = (
     "    adversary name from `completed_stages` is a mismatch.\n"
     "  * Phase history: if `memory._phase_history` exists, reject abilities\n"
     "    that duplicate work already done in a prior phase.\n"
+    "  * Evasion readiness: commands should use LOLBins and native tools where\n"
+    "    possible. Flag commands that use well-known tool names (mimikatz,\n"
+    "    meterpreter, etc.) in plain text — these WILL be blocked by AV/EDR.\n"
+    "    PowerShell commands should have -ep bypass -nop -w hidden flags.\n"
+    "    If issues_to_fix mentions blocking, verify the plan uses a different\n"
+    "    approach from the one that was blocked.\n"
+    "  * Tool acquisition: if the plan uses a tool that is not a default OS\n"
+    "    binary, verify there is a check+acquire step BEFORE the first use.\n"
+    "    The agent should figure out the right acquisition method based on\n"
+    "    the environment (available runtimes, transfer tools, network access).\n"
+    "    Tool binaries should be renamed to innocuous names. Downloaded files\n"
+    "    must go to the temp directory under 'bas' subdir.\n"
     "\n"
     "DECISION POLICY\n"
     "  * `accept` only if every check passes AND `phase_done` reasoning is\n"
@@ -258,6 +334,107 @@ _LATERAL_CRITERIA = (
     "reachable host id + the technique used."
 )
 
+_PERSISTENCE_CRITERIA = (
+    "Phase is DONE when memory contains at least one of:\n"
+    "  * `persistence.mechanism`    type of persistence (scheduled task, service,\n"
+    "    registry run key, WMI subscription, startup folder, cron job, etc.)\n"
+    "  * `persistence.location`     path / key / task name where persistence lives\n"
+    "  * `persistence.trigger`      what triggers re-execution (boot, logon, timer)\n"
+    "Stop once a single reliable persistence mechanism is confirmed."
+)
+
+_PERSISTENCE_NOTES = (
+    "PHASE NOTES — persistence\n"
+    "  * Prefer LOLBins and native OS mechanisms: schtasks, sc.exe, reg.exe,\n"
+    "    WMI subscriptions on Windows; cron, systemd timers, .bashrc on Linux.\n"
+    "  * Avoid dropping custom binaries when a living-off-the-land approach\n"
+    "    exists — EDR is watching for unsigned EXEs in temp dirs.\n"
+    "  * Budget: one adversary, 2-4 abilities. Create the persistence\n"
+    "    mechanism, then verify it exists.\n"
+    "  * If the foothold is not privileged, stick to user-level persistence\n"
+    "    (HKCU run keys, user-scoped scheduled tasks, startup folder).\n"
+)
+
+_DEFEVASION_CRITERIA = (
+    "Phase is DONE when memory contains at least one of:\n"
+    "  * `defevasion.technique`     evasion method used (AMSI bypass, ETW patch,\n"
+    "    log clearing, Defender exclusion, timestomping, etc.)\n"
+    "  * `defevasion.validated`     bool confirming the evasion worked\n"
+    "Stop once a single evasion technique is confirmed working."
+)
+
+_DEFEVASION_NOTES = (
+    "PHASE NOTES — defense evasion\n"
+    "  * CRITICAL: This phase exists to make subsequent phases succeed when\n"
+    "    security controls are blocking commands. Every technique must be\n"
+    "    tested for effectiveness.\n"
+    "  * Prefer in-memory techniques over disk-based: AMSI bypass via\n"
+    "    reflection, ETW patching, inline unhooking.\n"
+    "  * On Windows: consider Defender exclusion paths (if admin), WDAC\n"
+    "    bypass, PowerShell constrained language mode escape.\n"
+    "  * On Linux: consider unset HISTFILE, log tamper, process injection.\n"
+    "  * Budget: one adversary, 2-3 abilities. Apply evasion, then test it.\n"
+    "  * NEVER disable security controls permanently — only enough to\n"
+    "    complete the simulation objective.\n"
+)
+
+_IMPACT_CRITERIA = (
+    "Phase is DONE when memory contains at least one of:\n"
+    "  * `impact.technique`         impact method demonstrated (data staging,\n"
+    "    exfil simulation, ransomware simulation, account manipulation, etc.)\n"
+    "  * `impact.evidence`          proof the technique executed (file created,\n"
+    "    data collected, screenshot taken)\n"
+    "Stop once a single impact objective is demonstrated. This is a SIMULATION\n"
+    "— demonstrate capability without causing real damage."
+)
+
+_IMPACT_NOTES = (
+    "PHASE NOTES — impact\n"
+    "  * This is a SIMULATION — demonstrate capability, do NOT cause real\n"
+    "    damage. Stage data to temp dirs, simulate exfil to localhost,\n"
+    "    create proof-of-concept files.\n"
+    "  * Prefer data staging + collection over destructive actions.\n"
+    "  * Budget: one adversary, 2-3 abilities.\n"
+    "  * Archive collected intel to the bas temp directory as proof.\n"
+)
+
+_CREDACCESS_NOTES = (
+    "PHASE NOTES — credential access\n"
+    "  * Use results from discovery phase: target hosts with SMB/RDP/WinRM\n"
+    "    ports open, known domain controllers.\n"
+    "  * On Windows: prioritise native tools — reg save for SAM, secretsdump\n"
+    "    via impacket, Rubeus for Kerberos, DPAPI with built-in APIs.\n"
+    "  * On Linux: /etc/shadow (if root), .bash_history, SSH keys, browser\n"
+    "    credential stores.\n"
+    "  * Budget: one adversary, 3-5 abilities. Harvesting → extraction →\n"
+    "    verification pipeline.\n"
+    "  * If tools like Mimikatz are needed, handle detection evasion:\n"
+    "    renamed binary, reflective loading, or LOLBin alternative.\n"
+)
+
+_PRIVESC_NOTES = (
+    "PHASE NOTES — privilege escalation\n"
+    "  * Check what privileges the foothold already has before planning:\n"
+    "    whoami /priv, id, sudo -l.\n"
+    "  * On Windows: check for unquoted service paths, weak service\n"
+    "    permissions, SeImpersonate (potato attacks), AlwaysInstallElevated,\n"
+    "    scheduled task abuse.\n"
+    "  * On Linux: SUID binaries, sudo misconfigs, kernel exploits,\n"
+    "    capabilities, writable cron jobs, writable service configs.\n"
+    "  * Budget: one adversary, 2-4 abilities. Enumerate → exploit →\n"
+    "    verify pipeline.\n"
+)
+
+_LATERAL_NOTES = (
+    "PHASE NOTES — lateral movement\n"
+    "  * Use creds/tickets from credaccess + hosts from discovery.\n"
+    "  * Prefer protocol-native movement: SMB/PsExec, WinRM, SSH, RDP,\n"
+    "    DCOM, WMI — no custom implants.\n"
+    "  * Verify the new foothold before claiming success: execute a simple\n"
+    "    command (hostname, whoami) on the target host.\n"
+    "  * Budget: one adversary, 2-3 abilities.\n"
+)
+
 
 def _bootstrap_defaults() -> None:
     register_profile(PromptProfile(phase="default"))
@@ -269,17 +446,47 @@ def _bootstrap_defaults() -> None:
         )
     )
     register_profile(
-        PromptProfile(phase="credaccess", completion_criteria=_CREDACCESS_CRITERIA)
+        PromptProfile(
+            phase="credaccess",
+            specialist_system=_BASE_SPECIALIST + "\n" + _CREDACCESS_NOTES,
+            completion_criteria=_CREDACCESS_CRITERIA,
+        )
     )
     register_profile(
-        PromptProfile(phase="privesc", completion_criteria=_PRIVESC_CRITERIA)
+        PromptProfile(
+            phase="privesc",
+            specialist_system=_BASE_SPECIALIST + "\n" + _PRIVESC_NOTES,
+            completion_criteria=_PRIVESC_CRITERIA,
+        )
     )
     register_profile(
-        PromptProfile(phase="lateral", completion_criteria=_LATERAL_CRITERIA)
+        PromptProfile(
+            phase="lateral",
+            specialist_system=_BASE_SPECIALIST + "\n" + _LATERAL_NOTES,
+            completion_criteria=_LATERAL_CRITERIA,
+        )
     )
-    # phases without explicit criteria still get the base prompts.
-    for phase in ("persistence", "defevasion", "impact"):
-        register_profile(PromptProfile(phase=phase), overwrite=False)
+    register_profile(
+        PromptProfile(
+            phase="persistence",
+            specialist_system=_BASE_SPECIALIST + "\n" + _PERSISTENCE_NOTES,
+            completion_criteria=_PERSISTENCE_CRITERIA,
+        )
+    )
+    register_profile(
+        PromptProfile(
+            phase="defevasion",
+            specialist_system=_BASE_SPECIALIST + "\n" + _DEFEVASION_NOTES,
+            completion_criteria=_DEFEVASION_CRITERIA,
+        )
+    )
+    register_profile(
+        PromptProfile(
+            phase="impact",
+            specialist_system=_BASE_SPECIALIST + "\n" + _IMPACT_NOTES,
+            completion_criteria=_IMPACT_CRITERIA,
+        )
+    )
 
 
 _bootstrap_defaults()

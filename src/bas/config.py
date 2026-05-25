@@ -112,6 +112,7 @@ class LlmConfig(StrictModel):
     classifier_model: str = "gemini-3.5-flash"
     api_key_env: str = "GEMINI_API_KEY"
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    thinking_level: str = Field(default="medium", description="Thinking level: off, low, medium, high")
     grounding: GroundingConfig = Field(default_factory=GroundingConfig)
 
     @field_validator("provider")
@@ -119,6 +120,13 @@ class LlmConfig(StrictModel):
     def _check_provider(cls, v: str) -> str:
         if v not in {"gemini", "anthropic", "openai"}:
             raise ValueError("llm.provider must be gemini | anthropic | openai")
+        return v
+
+    @field_validator("thinking_level")
+    @classmethod
+    def _check_thinking(cls, v: str) -> str:
+        if v not in {"off", "minimal", "low", "medium", "high"}:
+            raise ValueError("llm.thinking_level must be off | minimal | low | medium | high")
         return v
 
 

@@ -59,6 +59,28 @@ exact list to revert.
 - For host-scoped persistence: local admin / SYSTEM on the target.
 - Human ACK token in `context.acks[]` for the specific technique attempted.
 
+## Tool acquisition
+
+Most persistence techniques use NATIVE OS capabilities — scheduled tasks,
+registry keys, services, WMI subscriptions, cron jobs, SSH keys, etc.
+These require NO downloads.
+
+**Strategy:**
+1. **Native first**: The majority of host-level persistence can be
+   achieved with built-in OS commands. Always prefer these.
+2. **AD-level persistence**: Some AD persistence techniques (ticket
+   forging, ACL manipulation) require specific tools. The agent should
+   check if any were already acquired in prior phases before downloading
+   again. Use web search to find the right tool and source if needed.
+3. **Reuse prior tools**: Tools acquired during credential access or
+   privilege escalation phases may still be available in the temp
+   directory. Check before re-downloading.
+4. **In-memory for scripts**: PowerShell-based AD modules can often be
+   loaded directly into memory without writing to disk.
+5. **Cleanup awareness**: Every persistence mechanism must have an exact
+   rollback command recorded — this includes cleaning up any tools
+   downloaded for this phase.
+
 ## Critical techniques
 
 | # | Technique | MITRE | Tools | Notes |

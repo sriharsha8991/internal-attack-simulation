@@ -25,6 +25,7 @@ llm:
   classifier_model: gemini-3.5-flash     # cheap model for grounding-depth routing
   api_key_env: GEMINI_API_KEY            # name of env var holding the key
   temperature: 0.2
+  thinking_level: ${LLM_THINKING_LEVEL:-medium}  # off | minimal | low | medium | high
   grounding:
     max_grounded_calls_per_run: 40
     default_depth: light                 # skip | light | deep

@@ -127,7 +127,59 @@ class LLMPlanner:
         "missing tool",
         "not installed",
         "command not found",
+        "not recognized",
+        "binary not found",
+        "download",
+        "github",
+        "release",
+        "pip install",
+        "gem install",
+        "no such file",
+        "cannot find",
+        "tool not available",
     )
+
+    # Phase-specific research queries — grounded web search to get latest TTPs,
+    # evasion techniques, and tool-specific guidance for each phase.
+    _PHASE_RESEARCH_QUERIES: dict[str, str] = {
+        "discovery": (
+            "Latest network discovery techniques for internal penetration testing "
+            "2024-2025. Best nmap scan profiles for stealth. Effective Windows/Linux "
+            "native commands for host enumeration without installing tools."
+        ),
+        "credaccess": (
+            "Latest credential access techniques 2024-2025. LSASS dump alternatives "
+            "that bypass modern EDR. Native Windows credential harvesting without "
+            "Mimikatz. DPAPI abuse techniques. Kerberoasting detection evasion."
+        ),
+        "privesc": (
+            "Latest Windows/Linux privilege escalation techniques 2024-2025. "
+            "Unpatched privilege escalation CVEs. LOLBins for privesc. "
+            "Service permission abuse. Token impersonation techniques."
+        ),
+        "lateral": (
+            "Latest lateral movement techniques 2024-2025 that evade EDR. "
+            "WinRM and DCOM-based movement. Pass-the-hash and pass-the-ticket "
+            "detection evasion. Living-off-the-land lateral movement."
+        ),
+        "persistence": (
+            "Latest persistence techniques 2024-2025 that evade AV/EDR. "
+            "Windows scheduled task and service-based persistence evasion. "
+            "Registry-based persistence that survives detection. "
+            "Linux persistence via systemd and cron evasion."
+        ),
+        "defevasion": (
+            "Latest defense evasion techniques 2024-2025. AMSI bypass methods "
+            "that still work. ETW patching techniques. Windows Defender exclusion "
+            "abuse. PowerShell constrained language mode bypass. "
+            "EDR unhooking and blinding techniques."
+        ),
+        "impact": (
+            "Latest data staging and exfiltration simulation techniques "
+            "2024-2025 for authorized red team exercises. Safe impact "
+            "demonstration methods."
+        ),
+    }
 
     def plan(
         self,
@@ -147,20 +199,53 @@ class LLMPlanner:
         # additional context. The structured call below always uses
         # grounding="skip".
         research_block = ""
+
+        # Phase-specific research — ONLY on retry / when prior commands were
+        # blocked or feedback mentions evasion.  First clean attempt relies on
+        # the skill playbook + model knowledge (saves a grounded call).
+        phase_stage = getattr(skill.frontmatter, "stage", None) or ""
+        issues_to_fix = state.get("issues_to_fix") or []
+        is_retry = bool(feedback) or bool(issues_to_fix)
+        needs_phase_research = is_retry and self._PHASE_RESEARCH_QUERIES.get(phase_stage.lower())
+        if needs_phase_research:
+            phase_query = self._PHASE_RESEARCH_QUERIES[phase_stage.lower()]
+            platform = (state.get("foothold") or {}).get("platform") or "unknown"
+            phase_query_full = (
+                f"{phase_query}\n"
+                f"Target platform: {platform}. "
+                f"Focus on techniques that work with native OS tools."
+            )
+            try:
+                rr = self._llm.research(phase_query_full, depth="light")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[plan] phase research failed: %s", exc)
+                rr = None
+            if rr and rr.text:
+                research_block = (
+                    "\n\n--- PHASE RESEARCH (latest TTPs) ---\n"
+                    + rr.text.strip()
+                )
+                if rr.citations:
+                    research_block += "\nSources: " + ", ".join(rr.citations[:6])
+
+        # Install/download-keyword research — tool acquisition help
         if feedback and any(
             kw in feedback.lower() for kw in self._INSTALL_KEYWORDS
         ):
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
             tool_allow = ", ".join(skill.frontmatter.tool_allowlist or []) or "(none listed)"
             query = (
-                "Operator-style red-team preflight research.\n"
+                "Red-team tool acquisition research.\n"
                 f"Foothold platform: {platform}.\n"
                 f"Skill tool allowlist: {tool_allow}.\n"
-                "List the CANONICAL native-package-manager IDs for the tools "
-                "an operator would need on this platform. Use winget/choco "
-                "for windows, apt-get/dnf for linux, brew for mac. Output one "
-                "line per tool in the form `tool=<pkg-manager> <package-id>`. "
-                "Stick to widely-shipped IDs; no commentary."
+                f"Feedback that triggered this: {feedback[:500]}\n\n"
+                "Find the CURRENT best way to obtain and deploy the needed "
+                "tool(s) on this platform. Consider:\n"
+                "  - Latest working download sources\n"
+                "  - Package manager availability\n"
+                "  - In-memory execution alternatives\n"
+                "  - Native OS commands that achieve the same goal\n"
+                "Provide actionable results. No hardcoded assumptions."
             )
             try:
                 rr = self._llm.research(query, depth="light")
@@ -168,12 +253,35 @@ class LLMPlanner:
                 logger.warning("[plan] preflight research failed: %s", exc)
                 rr = None
             if rr and rr.text:
-                research_block = (
+                research_block += (
                     "\n\n--- TOOL RESEARCH (grounded preflight) ---\n"
                     + rr.text.strip()
                 )
                 if rr.citations:
                     research_block += "\nCitations: " + ", ".join(rr.citations[:6])
+
+        # Blocked-command research — if prior attempt was blocked by security
+        blocked_hints = [i for i in issues_to_fix if "block" in i.lower() or "evas" in i.lower()]
+        if blocked_hints:
+            platform = (state.get("foothold") or {}).get("platform") or "unknown"
+            block_query = (
+                f"Red team command evasion for {platform} when EDR/AV blocks commands. "
+                f"Specific issues: {'; '.join(blocked_hints[:3])}. "
+                f"Provide alternative LOLBin commands, encoded execution, "
+                f"or AMSI bypass techniques that achieve the same goal."
+            )
+            try:
+                rr = self._llm.research(block_query, depth="light")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[plan] evasion research failed: %s", exc)
+                rr = None
+            if rr and rr.text:
+                research_block += (
+                    "\n\n--- EVASION RESEARCH (anti-blocking) ---\n"
+                    + rr.text.strip()
+                )
+                if rr.citations:
+                    research_block += "\nSources: " + ", ".join(rr.citations[:6])
 
         system = (
             f"{profile.specialist_system}\n\n--- SKILL PLAYBOOK ---\n{skill_md}"
@@ -220,6 +328,17 @@ class LLMPlanner:
         except Exception as exc:  # noqa: BLE001
             logger.warning("[plan/self-critique] failed: %s; using original plan", exc)
 
+        # ---- code-execution validation (only on retry) ---------------------
+        # Use Gemini's code_execution tool to validate command syntax. Only
+        # triggered when re-planning (feedback / issues_to_fix), since the
+        # first attempt already has self-critique and the evaluator as gates.
+        # This avoids burning a code_execution call on every clean first pass.
+        if is_retry:
+            try:
+                plan = self._validate_commands(plan, state, skill, system)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[plan/validate_commands] failed: %s; using plan as-is", exc)
+
         return plan
 
     # ---- self-critique helper -----------------------------------------------
@@ -248,6 +367,16 @@ class LLMPlanner:
         "     capture full output when gathering intel.\n"
         "  6. Platform consistency: all commands must be native to the\n"
         "     foothold's platform.\n"
+        "  7. TOOL AVAILABILITY: If the plan uses ANY tool that is not a\n"
+        "     default OS binary, verify there is a check+acquire step\n"
+        "     BEFORE its first use. The agent must figure out how to\n"
+        "     obtain the tool based on the environment (available runtimes,\n"
+        "     transfer utilities, network access, package managers). If no\n"
+        "     acquisition step exists and the tool is not built-in, flag it.\n"
+        "  8. EVASION READINESS: Check if any command uses well-known\n"
+        "     offensive tool names in the command string that AV/EDR\n"
+        "     would signature-match. These should use renamed binaries\n"
+        "     or in-memory execution.\n"
     )
 
     def _self_critique(
@@ -319,6 +448,76 @@ class LLMPlanner:
         ]
         return self._llm.generate_structured(
             msgs2, SpecialistPlan, grounding="skip", temperature=self._temperature
+        )
+
+    def _validate_commands(
+        self,
+        plan: SpecialistPlan,
+        state: "SessionState",
+        skill: Skill,
+        system_prompt: str,
+    ) -> SpecialistPlan:
+        """Use code execution to validate command syntax. Re-plans if issues found."""
+        if not hasattr(self._llm, "validate_commands"):
+            return plan
+
+        platform = (state.get("foothold") or {}).get("platform") or "windows"
+        commands: list[dict[str, str]] = []
+        for gen in plan.abilities:
+            for stage in gen.stages:
+                commands.append({
+                    "name": f"{gen.ability.name}/{stage.stage_name}",
+                    "executor": stage.executor,
+                    "command": stage.command_template,
+                })
+
+        if not commands:
+            return plan
+
+        result = self._llm.validate_commands(commands, platform=platform)
+        if result.all_valid:
+            logger.info("[plan/validate_commands] all commands passed validation")
+            return plan
+
+        # Build feedback from invalid commands and re-plan
+        import json as _json
+        issues_text = []
+        for v in result.validations:
+            if not v.valid:
+                issues_text.append(f"  - {v.name}: {'; '.join(v.issues)}")
+        if not issues_text:
+            return plan
+
+        logger.info(
+            "[plan/validate_commands] %d commands have issues, re-generating",
+            len(issues_text),
+        )
+
+        user_payload = {
+            "foothold": state.get("foothold", {}),
+            "memory": state.get("memory", {}),
+            "completed_stages": state.get("completed_stages", []),
+            "run_id": state.get("run_id"),
+        }
+        user_parts = [
+            "Emit a SpecialistPlan as JSON matching the schema.",
+            "Session context follows:",
+            "",
+            _json.dumps(user_payload, indent=2, default=str),
+            "",
+            "--- COMMAND VALIDATION ISSUES (must fix all) ---",
+            "Code execution validation found these command syntax issues:",
+            *issues_text,
+            "",
+            "Fix every flagged command. Ensure no placeholder tokens, balanced",
+            "quotes, valid shell syntax, and correct temp directory paths.",
+        ]
+        msgs = [
+            LLMMessage(role="system", content=system_prompt),
+            LLMMessage(role="user", content="\n".join(user_parts)),
+        ]
+        return self._llm.generate_structured(
+            msgs, SpecialistPlan, grounding="skip", temperature=self._temperature
         )
 
 

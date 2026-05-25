@@ -81,6 +81,30 @@ Full technique catalogue: [reference/techniques.md](reference/techniques.md).
 - Network destination outside `scope.subnets_allow` → **hard drop + alert**
   (scope filter, never bypassed).
 
+## Tool acquisition
+
+Defense evasion should primarily use BUILT-IN methods that require NO
+downloads. The agent should figure out the right approach based on what
+security controls it detects in the environment.
+
+**Strategy:**
+1. **Built-in first**: Most evasion techniques (AMSI bypass, ETW
+   patching, process manipulation) can be done with native PowerShell,
+   .NET reflection, or OS APIs. No downloads needed.
+2. **Environment-driven**: Detect what security products are present
+   (AV vendor, EDR product, logging configuration) and tailor the
+   evasion approach specifically to that product.
+3. **In-memory only**: If evasion code is needed, prefer loading it
+   directly into memory via download-cradles or reflection. Never
+   drop suspicious binaries to disk for evasion purposes.
+4. **Search for latest bypasses**: Security products update signatures
+   frequently. If a bypass technique is blocked, use web search to
+   find the latest working variant for that specific product.
+5. **Minimal footprint**: Defense evasion should NOT require downloading
+   large or suspicious binaries. If a binary-based approach is the
+   only option (e.g., driver-based EDR disabling), it should be a
+   last resort with immediate cleanup.
+
 ## Critical techniques
 
 | # | Technique | MITRE | Tools | Mode |

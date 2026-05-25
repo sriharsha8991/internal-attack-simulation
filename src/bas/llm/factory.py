@@ -24,6 +24,7 @@ def get_provider(cfg: "LlmConfig") -> LLMProvider:
             api_key_env=cfg.api_key_env,
             temperature=cfg.temperature,
             max_grounded_calls_per_run=cfg.grounding.max_grounded_calls_per_run,
+            thinking_level=cfg.thinking_level,
         )
     if name == "anthropic":
         from .anthropic import AnthropicProvider

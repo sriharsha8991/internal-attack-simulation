@@ -74,6 +74,34 @@ full provenance (`source`, `usable_for`, `validated_against`).
 - AMSI bypass + ETW patch loaded if Mimikatz / Rubeus run inline (ambient
   `evading-defenses`).
 
+## Tool acquisition
+
+Most credential-access tools are NOT pre-installed on the target. The agent
+must autonomously determine what tools are needed, discover how to obtain
+them, and handle the full lifecycle — all based on intelligence gathered
+from the target environment.
+
+**Strategy:**
+1. **Enumerate first**: Before acquiring ANY tool, check what is already
+   available on the foothold — installed runtimes (Python, .NET, Ruby),
+   native transfer utilities, package managers, network access to external
+   sources.
+2. **Native first**: Prefer OS-built-in methods. Many credential-access
+   techniques can be done with native commands and DLLs already present
+   on the system — use these before downloading anything.
+3. **Search when needed**: If a 3rd-party tool is required and you don't
+   know the exact source, use web search to find the latest working
+   download URL, alternative tool, or in-memory approach.
+4. **Inline pattern**: Handle check → acquire → rename → use → cleanup
+   in a SINGLE ability. Rename downloaded binaries to innocuous names.
+5. **Adapt**: If a tool or download method is blocked by security controls,
+   try alternative acquisition methods, in-memory execution, or a
+   completely different tool that achieves the same goal.
+
+The more environment details the agent collects (OS version, AV product,
+available runtimes, network policies), the better it can choose the right
+tool and acquisition path.
+
 ## Critical techniques
 
 | # | Technique | MITRE | Tools |

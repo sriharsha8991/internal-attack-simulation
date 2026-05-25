@@ -65,6 +65,25 @@ SVG, detection-gap analysis, remediation table.
 - For ransomware / BEC / exfil sims: `context.scope.simulations` flag set AND
   per-action ACK in `context.acks[]`.
 
+## Tool acquisition
+
+Impact phase mostly reuses tools already acquired in prior phases. The
+agent should check what is already available before attempting to acquire
+anything new.
+
+**Strategy:**
+1. **Check prior phases**: Tools downloaded or installed during credential
+   access, privilege escalation, or lateral movement may still be
+   available. Verify before re-acquiring.
+2. **Native for data operations**: OS-native commands for file listing,
+   archiving, hashing, and copying are sufficient for evidence capture.
+   No 3rd-party tools needed for data staging.
+3. **Evidence over extraction**: Impact is about PROVING capability, not
+   causing damage. Prefer metadata capture (file listings, hash
+   verification, directory enumeration) over copying actual sensitive data.
+4. **Search if needed**: If a specific capability is required that isn't
+   already available, use web search to find the right tool and source.
+
 ## Critical techniques
 
 | # | Technique | MITRE | Tools |

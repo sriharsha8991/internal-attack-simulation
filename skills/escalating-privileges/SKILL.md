@@ -56,6 +56,30 @@ side-channel credential (issued PFX, harvested hash) into `credentials[]`.
 - Local enum is missing or older than 30 minutes.
 - AMSI bypass loaded by ambient `evading-defenses` skill before any PS tool.
 
+## Tool acquisition
+
+Privilege escalation tools are NOT pre-installed. The agent must discover
+what is available on the target and autonomously determine the best
+acquisition strategy.
+
+**Strategy:**
+1. **Enumerate the environment first**: Check OS version, patch level,
+   installed runtimes, available transfer utilities, and active security
+   products. This information drives every tool decision.
+2. **Native first**: Many privesc checks can be done with built-in OS
+   commands — privilege enumeration, service path checks, registry
+   queries, etc. Exhaust native options before downloading anything.
+3. **Pure-script alternatives**: PowerShell-based tools can run entirely
+   in memory without dropping binaries to disk. Prefer these over
+   compiled executables when AV is present.
+4. **Search when needed**: If a specific tool is required, use web search
+   to find the latest working source, alternative, or in-memory loader.
+5. **Inline pattern**: check → acquire → rename → use → cleanup in a
+   SINGLE ability. Rename any downloaded binary to an innocuous name.
+6. **Fallback chain**: If the first tool is blocked by AV, switch to an
+   alternative. If all binary tools are blocked, fall back to pure
+   script-based enumeration. Mark blocked tools as burned.
+
 ## Critical techniques
 
 | # | Technique | MITRE | Tools | Trigger |

@@ -64,6 +64,32 @@ the next pivot per BloodHound shortest path.
 - Network reachability validated.
 - AMSI / ETW patched on the source if PowerShell-based methods are used.
 
+## Tool acquisition
+
+Lateral movement tools run FROM the current foothold TO the target. The
+agent must assess what is available on the foothold and choose the best
+approach autonomously.
+
+**Strategy:**
+1. **Enumerate the foothold**: What OS, runtimes (Python, Ruby, .NET),
+   and native remote-execution capabilities exist? This determines
+   everything.
+2. **Native first**: Most operating systems have built-in remote
+   execution methods (WMI, WinRM/PSRemoting, SSH, etc.) that require
+   NO downloads and are less likely to trigger AV. Always try these
+   first.
+3. **Runtime-based tools**: If the foothold has Python, Ruby, or other
+   runtimes, tools can be installed via their package managers. The
+   agent should discover what's available and install accordingly.
+4. **Search when needed**: If a specific tool is required but the agent
+   doesn't know how to obtain it, use web search to find the right
+   package name, source, or alternative.
+5. **Tunnelling**: If direct network access to the target is blocked,
+   the agent should identify and acquire appropriate tunnelling tools
+   based on what's available on the foothold platform.
+6. **Adapt**: If a lateral movement method is detected/blocked, switch
+   to a different protocol or tool. Mark blocked methods as burned.
+
 ## Critical techniques
 
 | # | Technique | MITRE | Tools | OPSEC |

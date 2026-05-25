@@ -39,6 +39,23 @@ class ResearchResult:
     queries: list[str] = field(default_factory=list)
 
 
+@dataclass
+class CommandValidation:
+    """Validation result for a single command."""
+    name: str
+    valid: bool
+    issues: list[str] = field(default_factory=list)
+    suggested_fix: str | None = None
+
+
+@dataclass
+class CommandValidationResult:
+    """Aggregated validation result for a batch of commands."""
+    validations: list[CommandValidation] = field(default_factory=list)
+    all_valid: bool = True
+    summary: str = ""
+
+
 class LLMProviderError(RuntimeError):
     """Wraps any provider-side failure (network, quota, schema)."""
 
@@ -93,6 +110,22 @@ class LLMProvider(Protocol):
         *,
         depth: GroundingDepth = "light",
     ) -> ResearchResult: ...
+
+    # ---- command validation -------------------------------------------------
+
+    def validate_commands(
+        self,
+        commands: list[dict[str, str]],
+        *,
+        platform: str = "windows",
+    ) -> "CommandValidationResult":
+        """Validate command syntax using code execution (where supported).
+
+        Each entry in `commands` is ``{"name": ..., "executor": ..., "command": ...}``.
+        Returns per-command validation results with suggested fixes.
+        Default implementation does nothing (passthrough).
+        """
+        ...
 
     # ---- bookkeeping --------------------------------------------------------
 

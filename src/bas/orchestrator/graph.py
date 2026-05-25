@@ -516,6 +516,34 @@ def _master_pick_phase(
         _log_step("MASTER/PICK", f"→ DONE (phase {briefing.phase!r} already completed)", level="warning")
         return {"master_done": True, "iteration": attempt, "log": log}
 
+    # ---- Per-phase retry cap (max 2 retries) --------------------------------
+    MAX_PHASE_RETRIES = 2
+    if briefing.retry_same_phase:
+        phase_attempts = sum(
+            1 for h in (state.get("phase_history") or [])
+            if h.get("phase") == briefing.phase and h.get("execution_outcome")
+        )
+        if phase_attempts >= MAX_PHASE_RETRIES:
+            msg = (
+                f"[master_plan/pick] phase {briefing.phase!r} already retried "
+                f"{phase_attempts} times; moving on"
+            )
+            log.append(msg)
+            _log_step(
+                "MASTER/PICK",
+                f"→ SKIP RETRY (phase {briefing.phase!r} retried {phase_attempts}x)",
+                level="warning",
+            )
+            # Force the phase into completed so master picks next
+            return {
+                "completed_phases": completed + [briefing.phase],
+                "retry_same_phase": False,
+                "issues_to_fix": [],
+                "master_done": False,
+                "iteration": attempt,
+                "log": log,
+            }
+
     next_skill = _first_skill_for_phase(briefing.phase, skill_tool)
     if next_skill is None:
         # No skill registered — route directly to push (which skips gracefully)
@@ -563,6 +591,7 @@ def _master_pick_phase(
         "master_done": False,           # explicit: we just picked a phase
         "retry_same_phase": briefing.retry_same_phase,
         "issues_to_fix": briefing.issues_to_fix,
+        "execution_summary": None,      # consumed by this PICK; clear for next phase
         "planner_attempts": 0,
         "planner_tool_calls": 0,
         "current_plan": None,
@@ -920,6 +949,10 @@ def _make_push_node(
                 "stage_results": list(state.get("stage_results") or []),
                 "retry_same_phase": False,  # consumed
                 "issues_to_fix": [],
+                # Explicitly reset multi-skill tracking so _after_push
+                # routes to analyse_results (not master_plan)
+                "phase_skills": [],
+                "phase_skill_index": 0,
                 # reset planning state so next cycle starts clean
                 "current_plan": None,
                 "current_plan_summary": [],
@@ -1065,11 +1098,11 @@ def _make_push_node(
                 if aid not in all_ability_ids:
                     all_ability_ids.append(aid)
             all_stage_id_maps.update(sd.get("stage_id_map", {}))
-            for name, aid in zip(
-                sd.get("ability_names", []),
-                sd.get("ability_ids", []),
-                strict=False,
-            ):
+            # Zip ability names with IDs — lengths should match since both
+            # come from the same push, but guard against partial failures.
+            names = sd.get("ability_names", [])
+            ids = sd.get("ability_ids", [])
+            for name, aid in zip(names, ids):
                 ability_name_to_id[name] = aid
 
         phase_asset_map = dict(state.get("phase_asset_map") or {})
@@ -1085,9 +1118,8 @@ def _make_push_node(
             for ab_name in sd.get("ability_names", []):
                 new_memory[f"pending.{phase}.{ab_name}"] = "awaiting_results"
 
-        completed_phases = list(state.get("completed_phases") or [])
-        if phase and phase not in completed_phases:
-            completed_phases.append(phase)
+        # Do NOT add phase to completed_phases here — analyse_results owns
+        # that decision after inspecting actual execution results.
 
         _log_step(
             "PUSH",
@@ -1100,11 +1132,10 @@ def _make_push_node(
         return {
             "stage_results": results,
             "completed_stages": completed_stages,
-            "completed_phases": completed_phases,
             "memory": new_memory,
             "phase_history": history,
             "phase_asset_map": phase_asset_map,
-            "pending_operation_id": push.adversary_id,  # set by backend on execution
+            "pending_operation_id": None,  # populated by analyse_results from backend result
             # reset all multi-skill tracking so next phase starts clean
             "phase_skills": [],
             "phase_skill_index": 0,
@@ -1157,9 +1188,60 @@ def _make_analyse_results_node(master: MasterPolicy):
         # Handle timeout resume — no results to analyse
         if isinstance(result_data, dict) and result_data.get("timeout"):
             log = list(state.get("log") or [])
-            log.append("[analyse_results] timeout — proceeding without results")
-            _log_step("ANALYSE", "→ TIMEOUT — keeping pending.* as unverified")
-            return {"log": log}
+            phase = state.get("current_phase") or ""
+
+            # Clear pending.* keys — they can't be verified without results
+            new_memory = dict(state.get("memory") or {})
+            pending_keys = [k for k in new_memory if k.startswith("pending.")]
+            for pk in pending_keys:
+                del new_memory[pk]
+
+            # Set execution_summary so master_plan sees timeout context
+            timeout_summary = (
+                f"TIMEOUT: Phase '{phase}' — the backend did not return results "
+                f"within the configured wait window. No abilities were confirmed. "
+                f"Possible causes: agent offline, target unreachable, long-running "
+                f"commands, or abilities blocked by security controls."
+            )
+
+            # Update phase_history with timeout outcome
+            history = list(state.get("phase_history") or [])
+            if history:
+                last = dict(history[-1])
+                last["execution_outcome"] = {
+                    "operation_id": None,
+                    "abilities_passed": 0,
+                    "abilities_failed": 0,
+                    "issues_detected": ["timeout"],
+                    "timeout": True,
+                }
+                history[-1] = last
+
+            log.append(
+                f"[analyse_results] TIMEOUT — cleared {len(pending_keys)} "
+                f"pending keys, signalling retry for phase={phase}"
+            )
+            _log_step(
+                "ANALYSE",
+                f"→ TIMEOUT — cleared pending.* keys, "
+                f"setting retry_same_phase=True for phase={phase!r}",
+                level="warning",
+            )
+
+            return {
+                "memory": new_memory,
+                "phase_history": history,
+                "execution_summary": timeout_summary,
+                "pending_operation_id": None,
+                "retry_same_phase": True,
+                "issues_to_fix": [
+                    "Previous attempt timed out — no results received. "
+                    "Consider: (1) commands may have been blocked by AV/EDR, "
+                    "(2) agent may be offline, (3) commands may need evasion "
+                    "techniques (LOLBins, encoded commands, AMSI bypass)."
+                ],
+                "log": log,
+            }
 
         # 1. Parse + issue detection
         op_result = parse_operation_result(result_data)

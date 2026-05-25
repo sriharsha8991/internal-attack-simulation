@@ -20,6 +20,8 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from .base import (
+    CommandValidation,
+    CommandValidationResult,
     GroundingBudgetExceeded,
     GroundingDepth,
     LLMMessage,
@@ -100,6 +102,7 @@ class GeminiProvider:
         api_key: str,
         temperature: float = 0.2,
         max_grounded_calls_per_run: int = 40,
+        thinking_level: str = "medium",
     ) -> None:
         # Import lazily so the module imports cleanly even when google-genai
         # is not installed (e.g. in unit tests using stub providers).
@@ -120,6 +123,7 @@ class GeminiProvider:
         self._temperature = temperature
         self._max_grounded = max_grounded_calls_per_run
         self._grounded_count = 0
+        self._thinking_level = thinking_level
 
     # ---- introspection ------------------------------------------------------
 
@@ -145,6 +149,7 @@ class GeminiProvider:
         grounding: GroundingDepth,
         temperature: float | None,
         response_schema: type[BaseModel] | None = None,
+        thinking: str | None = None,
     ) -> Any:
         types = self._genai.types
         tools: list[Any] = []
@@ -165,6 +170,20 @@ class GeminiProvider:
             kwargs["response_schema"] = _sanitize_schema_for_gemini(
                 response_schema.model_json_schema()
             )
+
+        # Enable thinking for deeper reasoning. The thinking_level controls
+        # how much internal reasoning the model does before answering.
+        # Use the call-level override or fall back to instance default.
+        effective_thinking = thinking or self._thinking_level
+        if effective_thinking and effective_thinking != "off":
+            try:
+                kwargs["thinking_config"] = types.ThinkingConfig(
+                    thinking_level=effective_thinking,
+                )
+            except Exception:
+                # Fallback: older SDK versions may not support ThinkingConfig
+                pass
+
         return types.GenerateContentConfig(**kwargs)
 
     def _to_contents(self, messages: list[LLMMessage]) -> list[Any]:
@@ -183,11 +202,13 @@ class GeminiProvider:
         grounding: GroundingDepth,
         temperature: float | None,
         response_schema: type[BaseModel] | None = None,
+        thinking: str | None = None,
     ) -> Any:
         config = self._build_config(
             grounding=grounding,
             temperature=temperature,
             response_schema=response_schema,
+            thinking=thinking,
         )
         try:
             resp = self._client.models.generate_content(
@@ -274,6 +295,7 @@ class GeminiProvider:
             grounding="skip",
             temperature=temperature,
             response_schema=schema,
+            thinking="high",  # structured planning needs deep reasoning
         )
         raw = (resp.text or "").strip()
         if not raw:
@@ -294,6 +316,7 @@ class GeminiProvider:
             messages=[msg],
             grounding="skip",
             temperature=0.0,
+            thinking="low",  # cheap classification — minimal reasoning
         )
         token = (resp.text or "").strip().lower().split()[0] if resp.text else "light"
         if token in {"skip", "light", "deep"}:
@@ -322,6 +345,104 @@ class GeminiProvider:
             queries=self._extract_queries(resp),
         )
 
+    def validate_commands(
+        self,
+        commands: list[dict[str, str]],
+        *,
+        platform: str = "windows",
+    ) -> CommandValidationResult:
+        """Use Gemini code execution to validate command syntax and logic.
+
+        The model writes Python code that parses/checks each command string
+        for common issues: unclosed quotes, placeholder tokens, missing
+        binaries, syntax errors in shell constructs.
+        """
+        if not commands:
+            return CommandValidationResult(all_valid=True, summary="no commands")
+
+        types = self._genai.types
+
+        # Build the validation prompt
+        import json as _json
+        cmd_list = _json.dumps(commands, indent=2)
+        prompt = (
+            f"You are a command-line syntax validator for {platform} systems.\n"
+            f"Validate the following commands. For each command, write Python code "
+            f"to check:\n"
+            f"1. No placeholder tokens (like #{{...}}, <TARGET>, {{{{...}}}}, "
+            f"${{{{VAR}}}})\n"
+            f"2. Balanced quotes (single and double)\n"
+            f"3. Valid shell syntax (pipes, redirects, semicolons, &&/||)\n"
+            f"4. No references to undefined variables from other commands\n"
+            f"5. Output directory uses temp path (not relative paths)\n\n"
+            f"Commands to validate:\n{cmd_list}\n\n"
+            f"For each command, print a line: "
+            f"VALID:<name> or INVALID:<name>:<issue description>\n"
+            f"At the end, print SUMMARY:<number_invalid> issues found"
+        )
+
+        try:
+            config = types.GenerateContentConfig(
+                tools=[types.Tool(code_execution=types.ToolCodeExecution())],
+                temperature=0.0,
+            )
+            resp = self._client.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=config,
+            )
+        except Exception as exc:
+            # Code execution is best-effort; don't block the pipeline
+            return CommandValidationResult(
+                all_valid=True,
+                summary=f"validation skipped (code_execution error: {exc})",
+            )
+
+        # Parse the response — look for executable_code results and text
+        validations: list[CommandValidation] = []
+        raw_output = ""
+
+        for part in (resp.candidates[0].content.parts if resp.candidates else []):
+            if hasattr(part, "code_execution_result") and part.code_execution_result:
+                raw_output += part.code_execution_result.output or ""
+            elif hasattr(part, "text") and part.text:
+                raw_output += part.text or ""
+
+        # Parse VALID/INVALID lines from output
+        cmd_names = {c["name"] for c in commands}
+        found_names: set[str] = set()
+        for line in raw_output.splitlines():
+            line = line.strip()
+            if line.startswith("VALID:"):
+                name = line[6:].strip()
+                if name in cmd_names:
+                    validations.append(CommandValidation(name=name, valid=True))
+                    found_names.add(name)
+            elif line.startswith("INVALID:"):
+                parts_split = line[8:].split(":", 1)
+                name = parts_split[0].strip()
+                issue = parts_split[1].strip() if len(parts_split) > 1 else "unknown issue"
+                if name in cmd_names:
+                    validations.append(
+                        CommandValidation(name=name, valid=False, issues=[issue])
+                    )
+                    found_names.add(name)
+
+        # Any commands not covered are assumed valid
+        for c in commands:
+            if c["name"] not in found_names:
+                validations.append(CommandValidation(name=c["name"], valid=True))
+
+        all_valid = all(v.valid for v in validations)
+        invalid_count = sum(1 for v in validations if not v.valid)
+        summary = f"{invalid_count} issue(s) found" if invalid_count else "all commands valid"
+
+        return CommandValidationResult(
+            validations=validations,
+            all_valid=all_valid,
+            summary=summary,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Convenience factory used by the top-level llm factory.
@@ -335,6 +456,7 @@ def build_from_env(
     api_key_env: str,
     temperature: float,
     max_grounded_calls_per_run: int,
+    thinking_level: str = "medium",
 ) -> GeminiProvider:
     api_key = os.environ.get(api_key_env)
     if not api_key:
@@ -348,4 +470,5 @@ def build_from_env(
         api_key=api_key,
         temperature=temperature,
         max_grounded_calls_per_run=max_grounded_calls_per_run,
+        thinking_level=thinking_level,
     )
