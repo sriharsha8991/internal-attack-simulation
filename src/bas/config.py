@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -127,6 +127,15 @@ class RunConfig(StrictModel):
     log_level: str = "INFO"
 
 
+class ExecutionConfig(StrictModel):
+    """Controls graph checkpointing and result-wait behaviour."""
+
+    result_wait_timeout: int = Field(default=600, ge=0, description="Seconds before timeout-resume fires.")
+    max_result_size_mb: int = Field(default=10, ge=1)
+    checkpointer: Literal["memory", "sqlite"] = "memory"
+    checkpoint_db: str = "runs/checkpoints.db"
+
+
 # ----------------------------------------------------------------------------
 # Top-level config
 # ----------------------------------------------------------------------------
@@ -136,6 +145,7 @@ class AppConfig(StrictModel):
     bas: BasConfig = Field(default_factory=BasConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     run: RunConfig = Field(default_factory=RunConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
 
     # Source path (debug/auditing). Excluded from `extra=forbid` because it's set
     # post-construction via `model_copy(update=...)`.

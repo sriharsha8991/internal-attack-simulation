@@ -17,7 +17,7 @@ from typing import Any, Iterable, Literal
 
 from ._serialise import serialise
 
-RunStatus = Literal["queued", "running", "completed", "failed"]
+RunStatus = Literal["queued", "running", "awaiting_results", "completed", "failed"]
 
 
 class RunStore:

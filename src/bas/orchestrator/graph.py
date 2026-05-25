@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 
 from ..agents.evaluator import EvaluatorPolicy, EvaluatorVerdict, StaticAcceptEvaluator
 from ..agents.master import (
@@ -56,6 +57,12 @@ from ..agents.specialist import (
 from ..client import BasClient
 from ..persistence import ArtifactStore
 from ..phases import resolve_phases_to_skills
+from ..results import (
+    OperationResult,
+    build_structural_summary,
+    detect_issues,
+    parse_operation_result,
+)
 from ..tools.skill_tool import SkillTool
 from .state import DONE_SENTINEL, PhaseRecord, SessionState, StageResult
 
@@ -147,11 +154,13 @@ def _skill_data_from_push(
         "skill": skill_name,
         "abilities_pushed": len(push.ability_ids),
         "adversary_id": push.adversary_id,
+        "ability_ids": push.ability_ids,
         "ability_names": ability_names,
         "techniques_used": techniques,
         "key_commands": key_commands[:15],
         "outcome": "committed" if push.success else "failed",
         "memory_delta_keys": list((mem_update.facts or {}).keys()),
+        "stage_id_map": push.stage_id_map,
     }
 
 
@@ -952,6 +961,38 @@ def _make_push_node(
         history = list(state.get("phase_history") or [])
         history.append(phase_rec.model_dump(mode="json"))
 
+        # ---- Phase 5: build phase_asset_map entry ---------------------------
+        all_ability_ids: list[str] = []
+        all_stage_id_maps: dict[str, dict[str, str]] = {}
+        ability_name_to_id: dict[str, str] = {}
+        phase_adversary_id: str | None = None
+        for sd in skills_buffer:
+            if sd.get("adversary_id"):
+                phase_adversary_id = sd["adversary_id"]
+            for aid in sd.get("ability_ids", []):
+                if aid not in all_ability_ids:
+                    all_ability_ids.append(aid)
+            all_stage_id_maps.update(sd.get("stage_id_map", {}))
+            for name, aid in zip(
+                sd.get("ability_names", []),
+                sd.get("ability_ids", []),
+                strict=False,
+            ):
+                ability_name_to_id[name] = aid
+
+        phase_asset_map = dict(state.get("phase_asset_map") or {})
+        phase_asset_map[phase] = {
+            "adversary_id": phase_adversary_id,
+            "ability_ids": all_ability_ids,
+            "stage_id_map": all_stage_id_maps,
+            "ability_name_to_id": ability_name_to_id,
+        }
+
+        # ---- Phase 5: write pending.* memory keys --------------------------
+        for sd in skills_buffer:
+            for ab_name in sd.get("ability_names", []):
+                new_memory[f"pending.{phase}.{ab_name}"] = "awaiting_results"
+
         completed_phases = list(state.get("completed_phases") or [])
         if phase and phase not in completed_phases:
             completed_phases.append(phase)
@@ -970,6 +1011,8 @@ def _make_push_node(
             "completed_phases": completed_phases,
             "memory": new_memory,
             "phase_history": history,
+            "phase_asset_map": phase_asset_map,
+            "pending_operation_id": push.adversary_id,  # set by backend on execution
             # reset all multi-skill tracking so next phase starts clean
             "phase_skills": [],
             "phase_skill_index": 0,
@@ -984,6 +1027,131 @@ def _make_push_node(
         }
 
     return push_node
+
+
+# ---------------------------------------------------------------------------
+# analyse_results node (Phase 4 — full implementation)
+# ---------------------------------------------------------------------------
+
+
+def _derive_phase_done(
+    op_result: OperationResult,
+    issues: list,
+) -> bool:
+    """Decide whether the phase is complete based on execution results.
+
+    Heuristic: phase is done when at least one ability passed and no critical
+    issues (placeholder tokens, tool-not-found) were detected in passing
+    abilities. Timeout alone doesn't block completion.
+    """
+    from ..results import IssueKind
+
+    passed_count = sum(1 for a in op_result.abilities if a.passed)
+    if passed_count == 0:
+        return False
+    critical_kinds = {IssueKind.PLACEHOLDER_TOKEN, IssueKind.TOOL_NOT_FOUND}
+    critical_issues = [i for i in issues if i.kind in critical_kinds]
+    return len(critical_issues) == 0
+
+
+def _make_analyse_results_node(master: MasterPolicy):
+    """Build the analyse_results node closure that captures the master agent."""
+
+    def analyse_results_node(state: SessionState) -> dict[str, Any]:
+        """Pause for backend results, then parse + LLM-analyse execution output."""
+        _log_step("ANALYSE", "pausing graph — awaiting backend results")
+        result_data = interrupt("awaiting_results")
+
+        # 1. Parse + issue detection
+        op_result = parse_operation_result(result_data)
+        phase = state.get("current_phase") or ""
+        asset_map = (state.get("phase_asset_map") or {}).get(phase, {})
+        stage_id_map = asset_map.get("stage_id_map", {})
+        issues = detect_issues(op_result, stage_id_map)
+        summary = build_structural_summary(op_result, issues)
+
+        _log_step(
+            "ANALYSE",
+            f"resumed — op={op_result.operation_id} "
+            f"abilities={len(op_result.abilities)} "
+            f"passed={sum(1 for a in op_result.abilities if a.passed)} "
+            f"issues={len(issues)}",
+        )
+
+        # 2. LLM analysis — extract confirmed facts from output
+        try:
+            mem_update = master.analyse_results(
+                results_dir=state.get("results_dir"),
+                operation_id=op_result.operation_id,
+                structural_summary=summary,
+                current_memory=state.get("memory", {}),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[analyse_results] LLM analysis failed: %s", exc)
+            mem_update = MemoryUpdate(
+                facts={}, narrative=f"analysis failed: {exc!r}"
+            )
+
+        # 3. Promote pending.* → confirmed facts
+        new_memory = dict(state.get("memory") or {})
+        # Remove all pending.* keys — they were speculative
+        pending_keys = [k for k in new_memory if k.startswith("pending.")]
+        for pk in pending_keys:
+            del new_memory[pk]
+        # Merge confirmed facts from LLM
+        for k, v in (mem_update.facts or {}).items():
+            new_memory[k] = v
+        if mem_update.narrative:
+            narratives = list(new_memory.get("narratives") or [])
+            narratives.append({
+                "phase": phase, "ts": _now(), "text": mem_update.narrative
+            })
+            new_memory["narratives"] = narratives
+
+        # 4. Phase done decision
+        phase_done = _derive_phase_done(op_result, issues)
+
+        # 5. Update phase_history entry with execution_outcome
+        history = list(state.get("phase_history") or [])
+        if history:
+            last = dict(history[-1])
+            last["execution_outcome"] = {
+                "operation_id": op_result.operation_id,
+                "abilities_passed": sum(1 for a in op_result.abilities if a.passed),
+                "abilities_failed": sum(1 for a in op_result.abilities if a.failed),
+                "issues_detected": [i.kind.value for i in issues],
+            }
+            history[-1] = last
+
+        completed_phases = list(state.get("completed_phases") or [])
+        if phase_done and phase and phase not in completed_phases:
+            completed_phases.append(phase)
+
+        log = list(state.get("log") or [])
+        log.append(
+            f"[analyse_results] op={op_result.operation_id} "
+            f"passed={sum(1 for a in op_result.abilities if a.passed)}/"
+            f"{len(op_result.abilities)} issues={len(issues)} "
+            f"phase_done={phase_done}"
+        )
+
+        _log_step(
+            "ANALYSE",
+            f"→ phase_done={phase_done}  "
+            f"memory_keys={list((mem_update.facts or {}).keys())}  "
+            f"issues={[i.kind.value for i in issues]}",
+        )
+
+        return {
+            "memory": new_memory,
+            "phase_history": history,
+            "completed_phases": completed_phases if phase_done else state.get("completed_phases"),
+            "execution_summary": summary,
+            "pending_operation_id": None,
+            "log": log,
+        }
+
+    return analyse_results_node
 
 
 # ---------------------------------------------------------------------------
@@ -1019,6 +1187,23 @@ def _after_plan(state: SessionState) -> str:
     return "evaluate"
 
 
+def _after_push(state: SessionState) -> str:
+    """Route out of push — conditional on whether more skills remain in the phase.
+
+    * Intermediate skill (more skills queued) → master_plan (plan the next skill).
+    * Last skill in phase (phase complete) → analyse_results (wait for backend).
+
+    Design note (Issue #1 fix): unconditional ``push → analyse_results`` would
+    break multi-skill phases because intermediate pushes don't need to wait for
+    backend results.
+    """
+    phase_skills = state.get("phase_skills") or []
+    skill_idx = state.get("phase_skill_index", 0)
+    if skill_idx + 1 < len(phase_skills):
+        return "master_plan"
+    return "analyse_results"
+
+
 # ---------------------------------------------------------------------------
 # build
 # ---------------------------------------------------------------------------
@@ -1032,6 +1217,7 @@ def build_graph(
     bas: BasClient,
     artifacts: ArtifactStore | None = None,
     evaluator: EvaluatorPolicy | None = None,
+    checkpointer: Any = None,
 ):
     """Compile the master-driven orchestrator graph."""
     evaluator = evaluator or StaticAcceptEvaluator()
@@ -1042,6 +1228,7 @@ def build_graph(
     g.add_node("plan", _make_plan_node(planner, skill_tool))
     g.add_node("evaluate", _make_evaluate_node(evaluator, skill_tool))
     g.add_node("push", _make_push_node(master, skill_tool, bas, artifacts))
+    g.add_node("analyse_results", _make_analyse_results_node(master))
 
     g.add_edge(START, "init")
     g.add_edge("init", "master_plan")
@@ -1056,8 +1243,13 @@ def build_graph(
         {"evaluate": "evaluate", "master": "master_plan"},
     )
     g.add_edge("evaluate", "plan")
-    g.add_edge("push", "master_plan")
-    return g.compile()
+    g.add_conditional_edges(
+        "push",
+        _after_push,
+        {"analyse_results": "analyse_results", "master_plan": "master_plan"},
+    )
+    g.add_edge("analyse_results", "master_plan")
+    return g.compile(checkpointer=checkpointer)
 
 
 def run_orchestrator(
@@ -1075,6 +1267,7 @@ def run_orchestrator(
     max_master_revisions: int = 1,
     max_planner_attempts: int = 3,
     max_planner_tool_calls: int = 20,
+    checkpointer: Any = None,
 ) -> SessionState:
     """Convenience runner. Returns the terminal `SessionState`.
 
@@ -1092,6 +1285,7 @@ def run_orchestrator(
         bas=bas,
         artifacts=artifacts,
         evaluator=evaluator,
+        checkpointer=checkpointer,
     )
     seed: SessionState = {
         "foothold": foothold or {},
@@ -1104,10 +1298,16 @@ def run_orchestrator(
     if initial_state:
         seed.update(initial_state)
 
+    # Thread ID for checkpointer — defaults to run_id so each engagement
+    # gets its own checkpoint timeline.
+    thread_id = seed.get("run_id") or "default"
+    run_config = {"configurable": {"thread_id": thread_id}}
+
     logger.info(
-        "[GRAPH][START          ]  phases=%s  foothold_keys=%s",
+        "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
         seed.get("available_phases"),
         list((seed.get("foothold") or {}).keys()),
+        thread_id,
     )
 
     # Stream updates to get per-step visibility; merge into full state so the
@@ -1115,7 +1315,7 @@ def run_orchestrator(
     # Each node returns FULL lists (not diffs), so plain dict.update is correct.
     state: dict[str, Any] = dict(seed)
     step_count = 0
-    for chunk in app.stream(seed, stream_mode="updates"):
+    for chunk in app.stream(seed, config=run_config, stream_mode="updates"):
         for node_name, node_updates in chunk.items():
             step_count += 1
             phase = node_updates.get("current_phase") or state.get("current_phase") or ""

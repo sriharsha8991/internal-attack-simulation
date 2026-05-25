@@ -14,7 +14,7 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from .persistence import ResultStore, RunStore
@@ -30,6 +30,7 @@ router = APIRouter(tags=["results"])
 async def receive_results(
     engagement_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
 ) -> Any:
     """Accept execution results POSTed by the BAS backend.
 
@@ -37,7 +38,7 @@ async def receive_results(
     Status transitions are owned by graph nodes, not this endpoint.
     """
     # Resolve stores from process-global state.
-    from .api import _bootstrap, _state
+    from .bootstrap import _bootstrap, _state
     _bootstrap()
     store: RunStore = _state["store"]
     results_store: ResultStore = _state["results_store"]
@@ -104,7 +105,11 @@ async def receive_results(
         len(body),
     )
 
-    # 8. Return accepted — graph resume is wired in Phase 3
+    # 8. Schedule graph resume in the background (Issue #4 fix) so this
+    #    response returns 202 immediately without blocking on LLM calls.
+    from .worker import _resume_graph
+    background_tasks.add_task(_resume_graph, engagement_id, payload)
+
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={"status": "accepted", "operation_id": operation_id},

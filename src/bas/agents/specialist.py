@@ -66,6 +66,10 @@ class PushResult(BaseModel):
     """Compact view of what was emitted, fed to the evaluator. One entry per
     ability: {name, mitre_technique_id, platform, executor, command_templates}."""
 
+    stage_id_map: dict[str, dict[str, str]] = Field(default_factory=dict)
+    """Per-ability stage ID map: {ability_name -> {stage_name -> stage_id}}.
+    Enables Phase 7 feedback loop to target specific stages by ID."""
+
 
 # ----------------------------------------------------------------------------
 # Planner protocol + implementations
@@ -427,6 +431,7 @@ def push_specialist(
     # ---- 2 & 3. push abilities + stages -------------------------------------
     ability_ids: list[str] = []
     stage_ids: list[str] = []
+    stage_id_map: dict[str, dict[str, str]] = {}
     pushed_stages_by_ability: dict[str, list] = {}
     engagement_id = state.get("run_id")
     try:
@@ -444,8 +449,10 @@ def push_specialist(
             )
             for stage in gen.stages:
                 st_resp = bas.abilities.create_stage(ab_resp.ability_id, stage)
-                stage_ids.append(_id_of(st_resp.stage_id))
+                st_id = _id_of(st_resp.stage_id)
+                stage_ids.append(st_id)
                 pushed_stages_by_ability[ab_id].append(stage)
+                stage_id_map.setdefault(gen.ability.name, {})[stage.stage_name] = st_id
                 logger.info(
                     "[bas] POST /abilities/%s/stages -> %s  (order=%d executor=%s)",
                     ab_id,
@@ -552,6 +559,7 @@ def push_specialist(
         provider_id=provider_id,
         rationale=rationale or None,
         plan_summary=plan_summary,
+        stage_id_map=stage_id_map,
     )
 
 

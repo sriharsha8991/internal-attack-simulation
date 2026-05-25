@@ -200,6 +200,47 @@ _MEMORY_UPDATE_PROMPT = (
     "    explicitly supersedes them.\n"
 )
 
+_MASTER_ANALYSE_TRIAGE_PROMPT = (
+    "ROLE\n"
+    "  Master campaign director reviewing EXECUTION RESULTS from the BAS\n"
+    "  backend. You have the structural summary of what each ability/stage\n"
+    "  produced when run on the target.\n"
+    "\n"
+    "TASK\n"
+    "  Identify which abilities deserve DEEPER inspection of their raw\n"
+    "  stdout/stderr. Name each ability by its exact `name` field from the\n"
+    "  summary. Focus on abilities that:\n"
+    "    * Passed and likely produced extractable intel (IPs, hosts, creds,\n"
+    "      service names, paths).\n"
+    "    * Failed with interesting stderr (permission denied, partial data).\n"
+    "  Skip abilities that clearly timed out or had placeholder errors.\n"
+    "\n"
+    "OUTPUT\n"
+    "  A plain-text list of ability names, one per line. Nothing else.\n"
+)
+
+_MASTER_ANALYSE_EXTRACT_PROMPT = (
+    "ROLE\n"
+    "  Master memory keeper. You are reviewing ACTUAL execution output (stdout\n"
+    "  and stderr) from completed abilities. Your job is to extract confirmed\n"
+    "  facts from the output and record them in structured memory.\n"
+    "\n"
+    "TASK\n"
+    "  Emit a MemoryUpdate. `facts` carries STRUCTURED keys (e.g. network,\n"
+    "  ad, creds, lateral, services) with concrete values extracted from the\n"
+    "  output. `narrative` is one paragraph summarising what was confirmed.\n"
+    "\n"
+    "RULES\n"
+    "  * Only record facts that are CONFIRMED by output. Do not speculate.\n"
+    "  * If exit_code != 0, note failures under `issues.{phase}` rather\n"
+    "    than as confirmed facts.\n"
+    "  * If stdout contains IPs, CIDRs, hostnames, service names, usernames,\n"
+    "    or file paths, extract them into structured keys.\n"
+    "  * Merge with existing memory: preserve prior keys unless this output\n"
+    "    explicitly supersedes them.\n"
+    "  * Delete any `pending.*` keys that are now confirmed or contradicted.\n"
+)
+
 
 # ---------------------------------------------------------------------------
 # Protocol + LLM-backed implementation
@@ -234,6 +275,15 @@ class MasterPolicy(Protocol):
         memory: dict,
         briefing: PhaseBriefing,
         plan_summary: list[dict],
+    ) -> MemoryUpdate: ...
+
+    def analyse_results(
+        self,
+        *,
+        results_dir: str | None,
+        operation_id: str,
+        structural_summary: str,
+        current_memory: dict,
     ) -> MemoryUpdate: ...
 
 
@@ -349,6 +399,86 @@ class LLMMasterRouter:
             msgs, MemoryUpdate, grounding="skip", temperature=0.0
         )
 
+    def analyse_results(
+        self,
+        *,
+        results_dir: str | None,
+        operation_id: str,
+        structural_summary: str,
+        current_memory: dict,
+    ) -> MemoryUpdate:
+        """Two-step LLM analysis of execution results.
+
+        Step A (unstructured): triage which abilities need deeper inspection.
+        Step B (structured): extract confirmed facts from selected stage output.
+        """
+        from ..tools.master_tools import read_stage_output
+
+        # Step A — triage: identify abilities worth deeper inspection
+        triage_msgs = [
+            LLMMessage(role="system", content=_MASTER_ANALYSE_TRIAGE_PROMPT),
+            LLMMessage(
+                role="user",
+                content=(
+                    "Structural summary of execution results:\n\n"
+                    + structural_summary
+                ),
+            ),
+        ]
+        try:
+            triage_text = self._llm.generate(
+                triage_msgs, grounding="skip", temperature=0.0
+            )
+            ability_names = [
+                line.strip().lstrip("- •*")
+                for line in triage_text.strip().splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+        except Exception as exc:
+            logger.warning("[master/analyse] triage step failed: %s; inspecting all", exc)
+            ability_names = []
+
+        # Collect detailed output for selected (or all) abilities
+        detailed_output = ""
+        if results_dir and ability_names:
+            parts: list[str] = []
+            for name in ability_names[:10]:  # cap to prevent context blowup
+                out = read_stage_output(results_dir, operation_id, name.strip())
+                if not out.startswith("[no matching"):
+                    parts.append(out)
+            detailed_output = "\n".join(parts)
+
+        if not detailed_output and results_dir:
+            # Fallback: grab output for ALL abilities (first 5)
+            from ..results import parse_operation_result
+            from ..tools.master_tools import _load_result
+
+            raw = _load_result(results_dir, operation_id)
+            if raw:
+                op = parse_operation_result(raw)
+                parts = []
+                for ab in op.abilities[:5]:
+                    out = read_stage_output(results_dir, operation_id, ab.name)
+                    if not out.startswith("[no matching"):
+                        parts.append(out)
+                detailed_output = "\n".join(parts)
+
+        # Step B — extract confirmed facts from output
+        extract_payload = (
+            f"Structural summary:\n{structural_summary}\n\n"
+            f"Current memory:\n{json.dumps(current_memory, indent=2, default=str)}\n"
+        )
+        if detailed_output:
+            extract_payload += f"\nDetailed stage output:\n{detailed_output}\n"
+
+        extract_msgs = [
+            LLMMessage(role="system", content=_MASTER_ANALYSE_EXTRACT_PROMPT),
+            LLMMessage(role="user", content=extract_payload),
+        ]
+        return self._llm.generate_structured(
+            extract_msgs, MemoryUpdate, grounding="skip", temperature=0.0
+        )
+
 
 class StaticMasterRouter:
     """Deterministic master used in tests/dry-run.
@@ -392,4 +522,17 @@ class StaticMasterRouter:
         return MemoryUpdate(
             facts={},
             narrative=f"static commit of phase {briefing.phase} ({len(plan_summary)} abilities)",
+        )
+
+    def analyse_results(
+        self,
+        *,
+        results_dir: str | None,
+        operation_id: str,
+        structural_summary: str,
+        current_memory: dict,
+    ) -> MemoryUpdate:
+        return MemoryUpdate(
+            facts={},
+            narrative=f"static analysis of operation {operation_id}",
         )

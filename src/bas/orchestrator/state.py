@@ -120,3 +120,11 @@ class SessionState(TypedDict, total=False):
     feedback: str            # critique injected into the next specialist call
     evaluator_action: str    # routing marker: "" | retry | accept | escalate
                              # | retry-exhausted | master_revise | commit
+
+    # ---- execution feedback (Phase 4) ----------------------------------------
+    pending_operation_id: str | None      # set by push, cleared by analyse
+    results_dir: str | None               # path to runs/{engagement_id}/results/
+    execution_summary: str | None         # structural summary from latest phase
+    phase_asset_map: dict[str, Any]       # {phase -> {adversary_id, ability_ids, stage_id_map, ...}}
+    retry_same_phase: bool                # set by master PICK when retrying a failed phase
+    issues_to_fix: list[str]              # specific issue descriptions for the planner on retry
