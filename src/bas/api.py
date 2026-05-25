@@ -27,17 +27,18 @@ Endpoints:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 import traceback
 import uuid
 from datetime import datetime
-from enum import Enum
 from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .agents import (
@@ -55,7 +56,7 @@ from .foothold import FootholdResolutionError, resolve_foothold
 from .llm import get_provider
 from ._logging import configure_logging
 from .orchestrator import run_orchestrator
-from .persistence import ArtifactStore, RunStore, make_record, now_iso
+from .persistence import ArtifactStore, ResultStore, RunStore, make_record, now_iso
 from .phases import build_phase_index, known_phases, resolve_phases_to_skills
 from .tools import SkillTool
 
@@ -167,7 +168,13 @@ class SkillInfo(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-_state: dict[str, Any] = {"cfg": None, "skills": None, "store": None, "artifacts": None}
+_state: dict[str, Any] = {
+    "cfg": None,
+    "skills": None,
+    "store": None,
+    "artifacts": None,
+    "results_store": None,
+}
 _state_lock = threading.Lock()
 
 
@@ -185,6 +192,7 @@ def _bootstrap() -> tuple[AppConfig, SkillTool, RunStore, ArtifactStore]:
             _state["skills"] = SkillTool("skills").prime()
             _state["store"] = RunStore(runs_dir)
             _state["artifacts"] = ArtifactStore(runs_dir)
+            _state["results_store"] = ResultStore(runs_dir)
             logger.info(
                 "[boot] base_url=%s dry_run=%s engagements_dir=%s skills=%d",
                 cfg.bas.base_url,
@@ -445,6 +453,11 @@ app = FastAPI(
     description="HTTP trigger surface for the BAS internal-attack orchestrator.",
 )
 
+# Mount sub-routers
+from .routes_results import router as results_router  # noqa: E402
+
+app.include_router(results_router)
+
 
 @app.on_event("startup")
 def _startup() -> None:
@@ -600,9 +613,8 @@ def list_artifacts(engagement_id: str) -> dict[str, list[dict[str, Any]]]:
             continue
         for path in sorted(d.glob("*.json")):
             try:
-                import json as _json
                 with path.open("r", encoding="utf-8") as f:
-                    out[kind].append(_json.load(f))
+                    out[kind].append(json.load(f))
             except (OSError, ValueError):
                 continue
     return out
@@ -611,8 +623,6 @@ def list_artifacts(engagement_id: str) -> dict[str, list[dict[str, Any]]]:
 # Foothold resolution failures map to 503 (platform-side issue, not a bad request).
 @app.exception_handler(FootholdResolutionError)
 def _on_foothold_error(_request: Any, exc: FootholdResolutionError) -> Any:
-    from fastapi.responses import JSONResponse
-
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": str(exc)},

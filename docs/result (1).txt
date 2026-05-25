@@ -1,0 +1,597 @@
+{
+  "operation_id": "141be4c2-5f02-4a63-a673-fcab8ba45579",
+  "operation_name": "Auto Test - Local-Observer-v1",
+  "operation_status": "completed",
+  "completed_at": "2026-05-20T16:51:07.049293",
+  "kill_switch_triggered": false,
+  "adversary": {
+    "adversary_id": "61b5a56c-42e5-4a87-a7e8-680169269576",
+    "name": "Local-Observer-v1"
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "f6ca6f35",
+      "hostname": "DESKTOP-OSMOT24",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 6,
+    "completed_abilities": 6,
+    "progress_percent": 100
+  },
+  "abilities": [
+    {
+      "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+      "name": "gather-initial-host-recon",
+      "description": "Gathers situational awareness on the local host before any network activity.",
+      "mitre_tactic": "TA0007",
+      "mitre_technique_id": "T1033",
+      "platform": "windows",
+      "impact_type": null,
+      "default_severity": null,
+      "requires_approval": false,
+      "tags": null,
+      "created_by": "ai",
+      "stages": [
+        {
+          "stage_id": "ffc3fa11-e8ea-4516-87f3-4864b4d5df5a",
+          "stage_name": "get-user-context",
+          "stage_order": 1,
+          "executor": "cmd",
+          "command_template": "whoami /all",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "passed",
+          "execution_log": {
+            "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+            "stage_id": "ffc3fa11-e8ea-4516-87f3-4864b4d5df5a",
+            "command_executed": "whoami /all",
+            "stdout": "\nUSER INFORMATION\n----------------\n\nUser Name             SID                                           \n===================== ==============================================\ndesktop-osmot24\\nidhi S-1-5-21-2564177724-2115137244-1086188946-1001\n\n\nGROUP INFORMATION\n-----------------\n\nGroup Name                                                    Type             SID          Attributes                                        \n============================================================= ================ ============ ==================================================\nEveryone                                                      Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\Local account and member of Administrators group Well-known group S-1-5-114    Group used for deny only                          \nBUILTIN\\Administrators                                        Alias            S-1-5-32-544 Group used for deny only                          \nBUILTIN\\Users                                                 Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\INTERACTIVE                                      Well-known group S-1-5-4      Mandatory group, Enabled by default, Enabled group\nCONSOLE LOGON                                                 Well-known group S-1-2-1      Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\Authenticated Users                              Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\This Organization                                Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\Local account                                    Well-known group S-1-5-113    Mandatory group, Enabled by default, Enabled group\nLOCAL                                                         Well-known group S-1-2-0      Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\NTLM Authentication                              Well-known group S-1-5-64-10  Mandatory group, Enabled by default, Enabled group\nMandatory Label\\Medium Mandatory Level                        Label            S-1-16-8192                                                    \n\n\nPRIVILEGES INFORMATION\n----------------------\n\nPrivilege Name                Description                          State   \n============================= ==================================== ========\nSeShutdownPrivilege           Shut down the system                 Disabled\nSeChangeNotifyPrivilege       Bypass traverse checking             Enabled \nSeUndockPrivilege             Remove computer from docking station Disabled\nSeIncreaseWorkingSetPrivilege Increase a process working set       Disabled\nSeTimeZonePrivilege           Change the time zone                 Disabled\n\n",
+            "stderr": "",
+            "exit_code": 0,
+            "executor": null,
+            "timestamp": "2026-05-20T16:45:46.328847"
+          },
+          "exit_code": 0
+        },
+        {
+          "stage_id": "92560702-c99f-4fc7-afaa-2db3ac587cdc",
+          "stage_name": "get-domain-membership",
+          "stage_order": 2,
+          "executor": "cmd",
+          "command_template": "net config workstation",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "passed",
+          "execution_log": {
+            "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+            "stage_id": "92560702-c99f-4fc7-afaa-2db3ac587cdc",
+            "command_executed": "net config workstation",
+            "stdout": "Computer name                        \\\\DESKTOP-OSMOT24\nFull Computer name                   DESKTOP-OSMOT24\nUser name                            nidhi\n\nWorkstation active on                \n\tNetBT_Tcpip_{DD02FCF1-5559-4376-9A62-D078283E76F7} (000C294424AA)\n\nSoftware version                     Windows 10 Pro\n\nWorkstation domain                   WORKGROUP\nLogon domain                         DESKTOP-OSMOT24\n\nCOM Open Timeout (sec)               0\nCOM Send Count (byte)                16\nCOM Send Timeout (msec)              250\nThe command completed successfully.\n\n",
+            "stderr": "",
+            "exit_code": 0,
+            "executor": null,
+            "timestamp": "2026-05-20T16:45:53.039244"
+          },
+          "exit_code": 0
+        },
+        {
+          "stage_id": "14dde5f6-3bba-44e2-acc7-0f13f2139c26",
+          "stage_name": "find-logged-on-users",
+          "stage_order": 3,
+          "executor": "cmd",
+          "command_template": "query user",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "failed",
+          "execution_log": {
+            "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+            "stage_id": "14dde5f6-3bba-44e2-acc7-0f13f2139c26",
+            "command_executed": "query user",
+            "stdout": " USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME\n>nidhi                 console             1  Active      none   20-05-2026 16:41\n",
+            "stderr": "",
+            "exit_code": 1,
+            "executor": null,
+            "timestamp": "2026-05-20T16:45:59.765599"
+          },
+          "exit_code": 1
+        },
+        {
+          "stage_id": "37e53c7e-810f-4c6a-a811-8fe57a9fcd1b",
+          "stage_name": "find-security-software",
+          "stage_order": 4,
+          "executor": "cmd",
+          "command_template": "tasklist /svc | findstr /i \"sec def av patrol agent guard\"",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "passed",
+          "execution_log": {
+            "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+            "stage_id": "37e53c7e-810f-4c6a-a811-8fe57a9fcd1b",
+            "command_executed": "tasklist /svc | findstr /i \"sec def av patrol agent guard\"",
+            "stdout": "MpDefenderCoreService.exe     3040 MDCoreSvc                                   \nMsMpEng.exe                   2492 WinDefend                                   \nsvchost.exe                   3212 webthreatdefusersvc_32b2c                   \nSecurityHealthService.exe     2088 SecurityHealthService                       \nSecurityHealthSystray.exe     4700 N/A                                         \nsvchost.exe                   7960 webthreatdefsvc                             \nWaaSMedicAgent.exe            3252 N/A                                         \n",
+            "stderr": "",
+            "exit_code": 0,
+            "executor": null,
+            "timestamp": "2026-05-20T16:46:07.953334"
+          },
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "ability_id": "76384971-cccf-4757-b917-7353986c6f65",
+      "name": "discover-local-network-range",
+      "description": "Determines the local network CIDR from the host's network configuration.",
+      "mitre_tactic": "TA0007",
+      "mitre_technique_id": "T1016",
+      "platform": "windows",
+      "impact_type": null,
+      "default_severity": null,
+      "requires_approval": false,
+      "tags": null,
+      "created_by": "ai",
+      "stages": [
+        {
+          "stage_id": "c3f9fa56-c8ec-4c22-b45c-6724deb74dad",
+          "stage_name": "run-ipconfig",
+          "stage_order": 1,
+          "executor": "cmd",
+          "command_template": "ipconfig /all",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "passed",
+          "execution_log": {
+            "ability_id": "76384971-cccf-4757-b917-7353986c6f65",
+            "stage_id": "c3f9fa56-c8ec-4c22-b45c-6724deb74dad",
+            "command_executed": "ipconfig /all",
+            "stdout": "\nWindows IP Configuration\n\n   Host Name . . . . . . . . . . . . : DESKTOP-OSMOT24\n   Primary Dns Suffix  . . . . . . . : \n   Node Type . . . . . . . . . . . . : Hybrid\n   IP Routing Enabled. . . . . . . . : No\n   WINS Proxy Enabled. . . . . . . . : No\n\nEthernet adapter Ethernet0:\n\n   Connection-specific DNS Suffix  . : \n   Description . . . . . . . . . . . : Intel(R) 82574L Gigabit Network Connection\n   Physical Address. . . . . . . . . : 00-0C-29-44-24-AA\n   DHCP Enabled. . . . . . . . . . . : Yes\n   Autoconfiguration Enabled . . . . : Yes\n   Link-local IPv6 Address . . . . . : fe80::c1fc:8bd3:e5b2:4fba%14(Preferred) \n   IPv4 Address. . . . . . . . . . . : 192.168.60.119(Preferred) \n   Subnet Mask . . . . . . . . . . . : 255.255.255.0\n   Lease Obtained. . . . . . . . . . : 20 May 2026 16:42:11\n   Lease Expires . . . . . . . . . . : 21 May 2026 16:42:09\n   Default Gateway . . . . . . . . . : 192.168.60.1\n   DHCP Server . . . . . . . . . . . : 192.168.60.1\n   DHCPv6 IAID . . . . . . . . . . . : 100666409\n   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-31-61-BB-B8-00-0C-29-44-24-AA\n   DNS Servers . . . . . . . . . . . : 8.8.8.8\n                                       1.1.1.1\n   NetBIOS over Tcpip. . . . . . . . : Enabled\n",
+            "stderr": "",
+            "exit_code": 0,
+            "executor": null,
+            "timestamp": "2026-05-20T16:46:13.827682"
+          },
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "ability_id": "0ce8f571-d23b-47d0-bde9-548be7621893",
+      "name": "check-for-nmap",
+      "description": "Checks if nmap is installed and on PATH.",
+      "mitre_tactic": "TA0007",
+      "mitre_technique_id": "T1518",
+      "platform": "windows",
+      "impact_type": null,
+      "default_severity": null,
+      "requires_approval": false,
+      "tags": null,
+      "created_by": "ai",
+      "stages": [
+        {
+          "stage_id": "19bed959-89a4-4444-a790-8c93e10fd467",
+          "stage_name": "run-nmap-version",
+          "stage_order": 1,
+          "executor": "cmd",
+          "command_template": "nmap --version || where nmap",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "failed",
+          "execution_log": {
+            "ability_id": "0ce8f571-d23b-47d0-bde9-548be7621893",
+            "stage_id": "19bed959-89a4-4444-a790-8c93e10fd467",
+            "command_executed": "nmap --version || where nmap",
+            "stdout": "",
+            "stderr": "'nmap' is not recognized as an internal or external command,\noperable program or batch file.\nINFO: Could not find files for the given pattern(s).\n",
+            "exit_code": 1,
+            "executor": null,
+            "timestamp": "2026-05-20T16:46:19.333152"
+          },
+          "exit_code": 1
+        }
+      ]
+    },
+    {
+      "ability_id": "5f110f4d-bcd1-4f17-9c64-c514f6856486",
+      "name": "install-nmap",
+      "description": "Installs nmap using the winget package manager.",
+      "mitre_tactic": "TA0007",
+      "mitre_technique_id": "T1518",
+      "platform": "windows",
+      "impact_type": null,
+      "default_severity": null,
+      "requires_approval": false,
+      "tags": null,
+      "created_by": "ai",
+      "stages": [
+        {
+          "stage_id": "b982b959-dec0-4cf2-af09-fbc3ded89fc2",
+          "stage_name": "run-winget-install",
+          "stage_order": 1,
+          "executor": "cmd",
+          "command_template": "winget install -e --id Insecure.Nmap --silent --accept-package-agreements --accept-source-agreements && nmap --version",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "failed",
+          "execution_log": {
+            "ability_id": "5f110f4d-bcd1-4f17-9c64-c514f6856486",
+            "stage_id": "b982b959-dec0-4cf2-af09-fbc3ded89fc2",
+            "command_executed": "winget install -e --id Insecure.Nmap --silent --accept-package-agreements --accept-source-agreements && nmap --version",
+            "stdout": "",
+            "stderr": "[!] Command timed out",
+            "exit_code": -1,
+            "executor": null,
+            "timestamp": "2026-05-20T16:50:51.262463"
+          },
+          "exit_code": -1
+        }
+      ]
+    },
+    {
+      "ability_id": "1d0d5966-05e7-4d46-a2ae-e018873871ac",
+      "name": "scan-for-live-hosts",
+      "description": "Performs a ping sweep of the local subnet to identify live hosts.",
+      "mitre_tactic": "TA0007",
+      "mitre_technique_id": "T1018",
+      "platform": "windows",
+      "impact_type": null,
+      "default_severity": null,
+      "requires_approval": false,
+      "tags": null,
+      "created_by": "ai",
+      "stages": [
+        {
+          "stage_id": "3f0bca3f-a11b-4af4-bf2e-b655eb82fc6b",
+          "stage_name": "run-nmap-ping-sweep",
+          "stage_order": 1,
+          "executor": "cmd",
+          "command_template": "nmap -sn -PE -PP -PS21,22,80,443,445,3389 -PA80,443,3389 -oA #{output_dir}/nmap_hostsweep #{network.cidr}",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "failed",
+          "execution_log": {
+            "ability_id": "1d0d5966-05e7-4d46-a2ae-e018873871ac",
+            "stage_id": "3f0bca3f-a11b-4af4-bf2e-b655eb82fc6b",
+            "command_executed": "nmap -sn -PE -PP -PS21,22,80,443,445,3389 -PA80,443,3389 -oA #{output_dir}/nmap_hostsweep #{network.cidr}",
+            "stdout": "",
+            "stderr": "'nmap' is not recognized as an internal or external command,\noperable program or batch file.\n",
+            "exit_code": 1,
+            "executor": null,
+            "timestamp": "2026-05-20T16:50:56.739738"
+          },
+          "exit_code": 1
+        }
+      ]
+    },
+    {
+      "ability_id": "2c9d0ab7-5a00-4809-ad16-7c3af64057a5",
+      "name": "scan-services-on-live-hosts",
+      "description": "Scans discovered live hosts for open ports and services.",
+      "mitre_tactic": "TA0007",
+      "mitre_technique_id": "T1046",
+      "platform": "windows",
+      "impact_type": null,
+      "default_severity": null,
+      "requires_approval": false,
+      "tags": null,
+      "created_by": "ai",
+      "stages": [
+        {
+          "stage_id": "de227162-c946-4331-861f-0102f249ccdf",
+          "stage_name": "run-nmap-service-scan",
+          "stage_order": 1,
+          "executor": "cmd",
+          "command_template": "nmap -sS -sV -Pn --top-ports 1000 --version-intensity 5 -oA #{output_dir}/nmap_services -iL #{network.live_hosts_file}",
+          "timeout_seconds": null,
+          "payload": null,
+          "execution_status": "failed",
+          "execution_log": {
+            "ability_id": "2c9d0ab7-5a00-4809-ad16-7c3af64057a5",
+            "stage_id": "de227162-c946-4331-861f-0102f249ccdf",
+            "command_executed": "nmap -sS -sV -Pn --top-ports 1000 --version-intensity 5 -oA #{output_dir}/nmap_services -iL #{network.live_hosts_file}",
+            "stdout": "",
+            "stderr": "'nmap' is not recognized as an internal or external command,\noperable program or batch file.\n",
+            "exit_code": 1,
+            "executor": null,
+            "timestamp": "2026-05-20T16:51:01.896739"
+          },
+          "exit_code": 1
+        }
+      ]
+    }
+  ],
+  "execution_logs": [
+    {
+      "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+      "stage_id": "ffc3fa11-e8ea-4516-87f3-4864b4d5df5a",
+      "command_executed": "whoami /all",
+      "stdout": "\nUSER INFORMATION\n----------------\n\nUser Name             SID                                           \n===================== ==============================================\ndesktop-osmot24\\nidhi S-1-5-21-2564177724-2115137244-1086188946-1001\n\n\nGROUP INFORMATION\n-----------------\n\nGroup Name                                                    Type             SID          Attributes                                        \n============================================================= ================ ============ ==================================================\nEveryone                                                      Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\Local account and member of Administrators group Well-known group S-1-5-114    Group used for deny only                          \nBUILTIN\\Administrators                                        Alias            S-1-5-32-544 Group used for deny only                          \nBUILTIN\\Users                                                 Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\INTERACTIVE                                      Well-known group S-1-5-4      Mandatory group, Enabled by default, Enabled group\nCONSOLE LOGON                                                 Well-known group S-1-2-1      Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\Authenticated Users                              Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\This Organization                                Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\Local account                                    Well-known group S-1-5-113    Mandatory group, Enabled by default, Enabled group\nLOCAL                                                         Well-known group S-1-2-0      Mandatory group, Enabled by default, Enabled group\nNT AUTHORITY\\NTLM Authentication                              Well-known group S-1-5-64-10  Mandatory group, Enabled by default, Enabled group\nMandatory Label\\Medium Mandatory Level                        Label            S-1-16-8192                                                    \n\n\nPRIVILEGES INFORMATION\n----------------------\n\nPrivilege Name                Description                          State   \n============================= ==================================== ========\nSeShutdownPrivilege           Shut down the system                 Disabled\nSeChangeNotifyPrivilege       Bypass traverse checking             Enabled \nSeUndockPrivilege             Remove computer from docking station Disabled\nSeIncreaseWorkingSetPrivilege Increase a process working set       Disabled\nSeTimeZonePrivilege           Change the time zone                 Disabled\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": null,
+      "timestamp": "2026-05-20T16:45:46.328847"
+    },
+    {
+      "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+      "stage_id": "92560702-c99f-4fc7-afaa-2db3ac587cdc",
+      "command_executed": "net config workstation",
+      "stdout": "Computer name                        \\\\DESKTOP-OSMOT24\nFull Computer name                   DESKTOP-OSMOT24\nUser name                            nidhi\n\nWorkstation active on                \n\tNetBT_Tcpip_{DD02FCF1-5559-4376-9A62-D078283E76F7} (000C294424AA)\n\nSoftware version                     Windows 10 Pro\n\nWorkstation domain                   WORKGROUP\nLogon domain                         DESKTOP-OSMOT24\n\nCOM Open Timeout (sec)               0\nCOM Send Count (byte)                16\nCOM Send Timeout (msec)              250\nThe command completed successfully.\n\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": null,
+      "timestamp": "2026-05-20T16:45:53.039244"
+    },
+    {
+      "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+      "stage_id": "14dde5f6-3bba-44e2-acc7-0f13f2139c26",
+      "command_executed": "query user",
+      "stdout": " USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME\n>nidhi                 console             1  Active      none   20-05-2026 16:41\n",
+      "stderr": "",
+      "exit_code": 1,
+      "executor": null,
+      "timestamp": "2026-05-20T16:45:59.765599"
+    },
+    {
+      "ability_id": "519a210c-b725-4887-aa1f-b3e6da42fae4",
+      "stage_id": "37e53c7e-810f-4c6a-a811-8fe57a9fcd1b",
+      "command_executed": "tasklist /svc | findstr /i \"sec def av patrol agent guard\"",
+      "stdout": "MpDefenderCoreService.exe     3040 MDCoreSvc                                   \nMsMpEng.exe                   2492 WinDefend                                   \nsvchost.exe                   3212 webthreatdefusersvc_32b2c                   \nSecurityHealthService.exe     2088 SecurityHealthService                       \nSecurityHealthSystray.exe     4700 N/A                                         \nsvchost.exe                   7960 webthreatdefsvc                             \nWaaSMedicAgent.exe            3252 N/A                                         \n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": null,
+      "timestamp": "2026-05-20T16:46:07.953334"
+    },
+    {
+      "ability_id": "76384971-cccf-4757-b917-7353986c6f65",
+      "stage_id": "c3f9fa56-c8ec-4c22-b45c-6724deb74dad",
+      "command_executed": "ipconfig /all",
+      "stdout": "\nWindows IP Configuration\n\n   Host Name . . . . . . . . . . . . : DESKTOP-OSMOT24\n   Primary Dns Suffix  . . . . . . . : \n   Node Type . . . . . . . . . . . . : Hybrid\n   IP Routing Enabled. . . . . . . . : No\n   WINS Proxy Enabled. . . . . . . . : No\n\nEthernet adapter Ethernet0:\n\n   Connection-specific DNS Suffix  . : \n   Description . . . . . . . . . . . : Intel(R) 82574L Gigabit Network Connection\n   Physical Address. . . . . . . . . : 00-0C-29-44-24-AA\n   DHCP Enabled. . . . . . . . . . . : Yes\n   Autoconfiguration Enabled . . . . : Yes\n   Link-local IPv6 Address . . . . . : fe80::c1fc:8bd3:e5b2:4fba%14(Preferred) \n   IPv4 Address. . . . . . . . . . . : 192.168.60.119(Preferred) \n   Subnet Mask . . . . . . . . . . . : 255.255.255.0\n   Lease Obtained. . . . . . . . . . : 20 May 2026 16:42:11\n   Lease Expires . . . . . . . . . . : 21 May 2026 16:42:09\n   Default Gateway . . . . . . . . . : 192.168.60.1\n   DHCP Server . . . . . . . . . . . : 192.168.60.1\n   DHCPv6 IAID . . . . . . . . . . . : 100666409\n   DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-31-61-BB-B8-00-0C-29-44-24-AA\n   DNS Servers . . . . . . . . . . . : 8.8.8.8\n                                       1.1.1.1\n   NetBIOS over Tcpip. . . . . . . . : Enabled\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": null,
+      "timestamp": "2026-05-20T16:46:13.827682"
+    },
+    {
+      "ability_id": "0ce8f571-d23b-47d0-bde9-548be7621893",
+      "stage_id": "19bed959-89a4-4444-a790-8c93e10fd467",
+      "command_executed": "nmap --version || where nmap",
+      "stdout": "",
+      "stderr": "'nmap' is not recognized as an internal or external command,\noperable program or batch file.\nINFO: Could not find files for the given pattern(s).\n",
+      "exit_code": 1,
+      "executor": null,
+      "timestamp": "2026-05-20T16:46:19.333152"
+    },
+    {
+      "ability_id": "5f110f4d-bcd1-4f17-9c64-c514f6856486",
+      "stage_id": "b982b959-dec0-4cf2-af09-fbc3ded89fc2",
+      "command_executed": "winget install -e --id Insecure.Nmap --silent --accept-package-agreements --accept-source-agreements && nmap --version",
+      "stdout": "",
+      "stderr": "[!] Command timed out",
+      "exit_code": -1,
+      "executor": null,
+      "timestamp": "2026-05-20T16:50:51.262463"
+    },
+    {
+      "ability_id": "1d0d5966-05e7-4d46-a2ae-e018873871ac",
+      "stage_id": "3f0bca3f-a11b-4af4-bf2e-b655eb82fc6b",
+      "command_executed": "nmap -sn -PE -PP -PS21,22,80,443,445,3389 -PA80,443,3389 -oA #{output_dir}/nmap_hostsweep #{network.cidr}",
+      "stdout": "",
+      "stderr": "'nmap' is not recognized as an internal or external command,\noperable program or batch file.\n",
+      "exit_code": 1,
+      "executor": null,
+      "timestamp": "2026-05-20T16:50:56.739738"
+    },
+    {
+      "ability_id": "2c9d0ab7-5a00-4809-ad16-7c3af64057a5",
+      "stage_id": "de227162-c946-4331-861f-0102f249ccdf",
+      "command_executed": "nmap -sS -sV -Pn --top-ports 1000 --version-intensity 5 -oA #{output_dir}/nmap_services -iL #{network.live_hosts_file}",
+      "stdout": "",
+      "stderr": "'nmap' is not recognized as an internal or external command,\noperable program or batch file.\n",
+      "exit_code": 1,
+      "executor": null,
+      "timestamp": "2026-05-20T16:51:01.896739"
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "operation:141be4c2-5f02-4a63-a673-fcab8ba45579",
+        "type": "operation",
+        "label": "Auto Test - Local-Observer-v1",
+        "status": "completed"
+      },
+      {
+        "id": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "type": "adversary",
+        "label": "Local-Observer-v1"
+      },
+      {
+        "id": "ability:519a210c-b725-4887-aa1f-b3e6da42fae4",
+        "type": "ability",
+        "label": "gather-initial-host-recon",
+        "platform": "windows"
+      },
+      {
+        "id": "stage:ffc3fa11-e8ea-4516-87f3-4864b4d5df5a",
+        "type": "stage",
+        "label": "get-user-context",
+        "status": "passed",
+        "executor": "cmd"
+      },
+      {
+        "id": "stage:92560702-c99f-4fc7-afaa-2db3ac587cdc",
+        "type": "stage",
+        "label": "get-domain-membership",
+        "status": "passed",
+        "executor": "cmd"
+      },
+      {
+        "id": "stage:14dde5f6-3bba-44e2-acc7-0f13f2139c26",
+        "type": "stage",
+        "label": "find-logged-on-users",
+        "status": "failed",
+        "executor": "cmd"
+      },
+      {
+        "id": "stage:37e53c7e-810f-4c6a-a811-8fe57a9fcd1b",
+        "type": "stage",
+        "label": "find-security-software",
+        "status": "passed",
+        "executor": "cmd"
+      },
+      {
+        "id": "ability:76384971-cccf-4757-b917-7353986c6f65",
+        "type": "ability",
+        "label": "discover-local-network-range",
+        "platform": "windows"
+      },
+      {
+        "id": "stage:c3f9fa56-c8ec-4c22-b45c-6724deb74dad",
+        "type": "stage",
+        "label": "run-ipconfig",
+        "status": "passed",
+        "executor": "cmd"
+      },
+      {
+        "id": "ability:0ce8f571-d23b-47d0-bde9-548be7621893",
+        "type": "ability",
+        "label": "check-for-nmap",
+        "platform": "windows"
+      },
+      {
+        "id": "stage:19bed959-89a4-4444-a790-8c93e10fd467",
+        "type": "stage",
+        "label": "run-nmap-version",
+        "status": "failed",
+        "executor": "cmd"
+      },
+      {
+        "id": "ability:5f110f4d-bcd1-4f17-9c64-c514f6856486",
+        "type": "ability",
+        "label": "install-nmap",
+        "platform": "windows"
+      },
+      {
+        "id": "stage:b982b959-dec0-4cf2-af09-fbc3ded89fc2",
+        "type": "stage",
+        "label": "run-winget-install",
+        "status": "failed",
+        "executor": "cmd"
+      },
+      {
+        "id": "ability:1d0d5966-05e7-4d46-a2ae-e018873871ac",
+        "type": "ability",
+        "label": "scan-for-live-hosts",
+        "platform": "windows"
+      },
+      {
+        "id": "stage:3f0bca3f-a11b-4af4-bf2e-b655eb82fc6b",
+        "type": "stage",
+        "label": "run-nmap-ping-sweep",
+        "status": "failed",
+        "executor": "cmd"
+      },
+      {
+        "id": "ability:2c9d0ab7-5a00-4809-ad16-7c3af64057a5",
+        "type": "ability",
+        "label": "scan-services-on-live-hosts",
+        "platform": "windows"
+      },
+      {
+        "id": "stage:de227162-c946-4331-861f-0102f249ccdf",
+        "type": "stage",
+        "label": "run-nmap-service-scan",
+        "status": "failed",
+        "executor": "cmd"
+      }
+    ],
+    "edges": [
+      {
+        "source": "operation:141be4c2-5f02-4a63-a673-fcab8ba45579",
+        "target": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "type": "uses"
+      },
+      {
+        "source": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "target": "ability:519a210c-b725-4887-aa1f-b3e6da42fae4",
+        "type": "links"
+      },
+      {
+        "source": "ability:519a210c-b725-4887-aa1f-b3e6da42fae4",
+        "target": "stage:ffc3fa11-e8ea-4516-87f3-4864b4d5df5a",
+        "type": "executes"
+      },
+      {
+        "source": "ability:519a210c-b725-4887-aa1f-b3e6da42fae4",
+        "target": "stage:92560702-c99f-4fc7-afaa-2db3ac587cdc",
+        "type": "executes"
+      },
+      {
+        "source": "ability:519a210c-b725-4887-aa1f-b3e6da42fae4",
+        "target": "stage:14dde5f6-3bba-44e2-acc7-0f13f2139c26",
+        "type": "executes"
+      },
+      {
+        "source": "ability:519a210c-b725-4887-aa1f-b3e6da42fae4",
+        "target": "stage:37e53c7e-810f-4c6a-a811-8fe57a9fcd1b",
+        "type": "executes"
+      },
+      {
+        "source": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "target": "ability:76384971-cccf-4757-b917-7353986c6f65",
+        "type": "links"
+      },
+      {
+        "source": "ability:76384971-cccf-4757-b917-7353986c6f65",
+        "target": "stage:c3f9fa56-c8ec-4c22-b45c-6724deb74dad",
+        "type": "executes"
+      },
+      {
+        "source": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "target": "ability:0ce8f571-d23b-47d0-bde9-548be7621893",
+        "type": "links"
+      },
+      {
+        "source": "ability:0ce8f571-d23b-47d0-bde9-548be7621893",
+        "target": "stage:19bed959-89a4-4444-a790-8c93e10fd467",
+        "type": "executes"
+      },
+      {
+        "source": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "target": "ability:5f110f4d-bcd1-4f17-9c64-c514f6856486",
+        "type": "links"
+      },
+      {
+        "source": "ability:5f110f4d-bcd1-4f17-9c64-c514f6856486",
+        "target": "stage:b982b959-dec0-4cf2-af09-fbc3ded89fc2",
+        "type": "executes"
+      },
+      {
+        "source": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "target": "ability:1d0d5966-05e7-4d46-a2ae-e018873871ac",
+        "type": "links"
+      },
+      {
+        "source": "ability:1d0d5966-05e7-4d46-a2ae-e018873871ac",
+        "target": "stage:3f0bca3f-a11b-4af4-bf2e-b655eb82fc6b",
+        "type": "executes"
+      },
+      {
+        "source": "adversary:61b5a56c-42e5-4a87-a7e8-680169269576",
+        "target": "ability:2c9d0ab7-5a00-4809-ad16-7c3af64057a5",
+        "type": "links"
+      },
+      {
+        "source": "ability:2c9d0ab7-5a00-4809-ad16-7c3af64057a5",
+        "target": "stage:de227162-c946-4331-861f-0102f249ccdf",
+        "type": "executes"
+      }
+    ]
+  }
+}
