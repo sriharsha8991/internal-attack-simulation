@@ -635,6 +635,9 @@ def push_specialist(
     engagement_id = state.get("run_id")
     try:
         for gen in plan.abilities:
+            # Stamp engagement_id so the backend can correlate this ability
+            # back to the originating engagement (critical for multi-engagement).
+            gen.ability.engagement_id = engagement_id
             ab_resp = bas.abilities.create(gen.ability)
             ab_id = _id_of(ab_resp.ability_id)
             ability_ids.append(ab_id)
@@ -684,6 +687,7 @@ def push_specialist(
 
     # ---- 4. push adversary --------------------------------------------------
     try:
+        plan.adversary.engagement_id = engagement_id
         adv_resp = bas.adversaries.create(plan.adversary)
         adversary_id = _id_of(adv_resp.adversary_id)
         logger.info(

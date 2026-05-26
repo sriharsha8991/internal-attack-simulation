@@ -1,14 +1,15 @@
 ---
 name: discovering-environment
-description: Network-first discovery. Starts from the foothold's own subnet (e.g. 192.168.1.0/24), confirms nmap is available (and installs it via the host's native package manager if not), sweeps the network for live assets, enumerates ports/services/versions on those assets, and ONLY then — and only if DC-indicative ports (88/389/445/636/3268) are observed — moves into Active Directory enumeration. Use as the very first stage after a fresh foothold, or whenever scope expands to a new subnet.
+description: Domain-aware network discovery skill. Starts from the foothold's subnet, sweeps for live assets via nmap, enumerates open ports and services, then — if DC-indicative ports (88/389/445/636/3268) are confirmed — launches a full progressive AD enumeration chain covering BloodHound collection, ACL/permission abuse, AD CS vulnerabilities, SMB shares, user/group/trust/GPO/delegation/DNS/Kerberoast/AS-REP, LAPS, MSSQL, Exchange, and printer/spooler discovery. Also handles non-domain hosts with standard port/service enumeration. Use as the primary discovery stage after a fresh foothold or whenever scope expands to a new subnet. Re-run Phase B on every new machine reached via lateral movement.
 stage: discovery
 agent: DiscoveryAgent
-mitre_tactics: ["TA0007"]
+mitre_tactics: ["TA0007", "TA0006", "TA0008"]
 default_opsec: moderate
 ambient: false
 tool_allowlist:
-  # ---- recon backbone (always allowed) ----
+  # ---- recon backbone ----
   - nmap
+  - masscan
   - ping
   - tracert
   - traceroute
@@ -19,7 +20,7 @@ tool_allowlist:
   - arp
   - netstat
   - ss
-  # ---- package managers (for nmap install only) ----
+  # ---- package managers (nmap install only) ----
   - winget
   - choco
   - apt
@@ -27,157 +28,366 @@ tool_allowlist:
   - yum
   - dnf
   - brew
-  # ---- conditional: only after a DC port is observed ----
-  - crackmapexec
+  # ---- non-domain service fingerprinting ----
+  - netexec
+  - smbclient
+  # ---- domain enumeration (D1–D20, gate: DC confirmed) ----
+  - sharphound
+  - bloodhound-python
+  - azurehound
+  - powerview
+  - adexplorer
+  - adaclscanner
+  - daclenum
+  - certipy
+  - certify
+  - pspkiaudit
+  - locksmith
+  - snaffler
+  - sauroneye
+  - sharpshares
   - ldapsearch
   - rpcclient
-  - smbclient
   - enum4linux-ng
+  - ldapdomaindump
+  - windapsearch
+  - adidnsdump
+  - dnsx
+  - nslookup
+  - nltest
+  - dig
+  - rubeus
+  - impacket-getuserspns
+  - impacket-getnpusers
+  - impacket-finddelegation
+  - kerbrute
+  - group3r
+  - gpoddity
+  - sharpgpo
+  - roadtools
+  - aadinternals
+  - stormspotter
+  - seatbelt
+  - winpeas
+  - powerupsql
+  - sqlcmd
+  - mailsniper
+  - ruler
+  - spoolsample
+  - petitpotam
+  - lapstoolkit
+  - pingcastle
 budget:
   max_tool_calls: 20
   max_wallclock_min: 15
 ---
 
-# Discovering the environment
+# Discovering the AD / Environment
 
-Build a factual, evidence-driven inventory of the network the foothold sits in.
-**Network reconnaissance comes first**; identity / Active Directory enumeration
-is a *conditional* follow-up that only runs after the port scan proves there is
-a domain controller in scope. Skipping the network sweep and jumping straight
-to BloodHound or SharpHound is a misuse of this skill.
+Build a factual, evidence-driven inventory of the network and — when a domain
+controller is confirmed in scope — a complete Active Directory attack-surface
+map covering all D1–D20 techniques from `reference/techniques.md`.
 
-## Mandatory step ordering
+**Phase A (Steps 1–7) is mandatory for every run.** Phase B (Steps 8–27) is
+conditional: it fires only after Step 7 confirms a domain controller. Non-domain
+hosts discovered in Step 5 receive the standard service-fingerprinting path
+(Step 6) and are then routed to the appropriate lateral-movement skill.
 
-Every ability emitted by this skill must implement exactly **one** of the
-numbered steps below, in order. The orchestrator runs them sequentially; each
-step's output gates the next.
+**Re-run Phase B (starting from Step 8) on every new machine reached via lateral movement.**
+
+Per-step command templates and parser hints: [reference/tool-commands.md](reference/tool-commands.md).
+Full technique catalogue with tool selection guidance: [reference/techniques.md](reference/techniques.md).
+
+---
+
+## Phase A — Network Discovery (always runs)
 
 ### Step 1 — Determine the local network range
 
-Goal: discover the CIDR the foothold is attached to so the rest of the skill
-has a concrete scan target. Do **not** invent a range; read it from the host.
+Goal: discover the CIDR the foothold is attached to. Do **not** invent a range;
+read it from the host.
 
-- Windows (`cmd`): `ipconfig /all` (parse the IPv4 + subnet mask of the
-  primary adapter; `route print` as a cross-check for the default gateway's
-  subnet).
-- Linux / macOS (`sh`): `ip -o -4 addr show` (or `ifconfig -a` on
-  BSD/macOS) + `ip route`.
+- Windows (`cmd`): `ipconfig /all` + `route print` as cross-check.
+- Linux / macOS (`sh`): `ip -o -4 addr show` + `ip route` (or `ifconfig -a` on BSD/macOS).
 
-Emit **one** ability with one stage that runs the platform-appropriate command.
-Save the discovered CIDR into memory as `network.cidr` (e.g. `192.168.1.0/24`).
+Emit **one** ability with one stage. Save: `network.cidr` (e.g. `192.168.1.0/24`).
 
 ### Step 2 — Confirm nmap is installed
 
-Goal: prove `nmap` is on PATH before any scan command is queued. A scan ability
-that fails because nmap is missing wastes a tool budget slot and is forbidden.
+Goal: prove `nmap` is on PATH before any scan is queued.
 
-- Windows (`cmd`): `nmap --version` (use `where nmap` as a fallback presence
-  check).
-- Linux / macOS (`sh`): `nmap --version` (use `command -v nmap` as a
-  fallback presence check).
+- Windows: `nmap --version` (fallback: `where nmap`).
+- Linux / macOS: `nmap --version` (fallback: `command -v nmap`).
 
-Emit **one** ability with one stage. Memory key: `recon.nmap_available` = bool.
+Emit **one** ability. Memory key: `recon.nmap_available` = bool.
 
-### Step 3 — Install nmap if it is missing
+### Step 3 — Install nmap if missing
 
-Run **only** if Step 2 reported the binary missing. Pick the package manager
-that exists on the host platform. Never download installers from arbitrary
-URLs; only use the host's native package manager.
+Run **only** if Step 2 reported the binary absent. Use the host's native package
+manager; never download from arbitrary URLs.
 
-- Windows: `winget install -e --id Insecure.Nmap --silent --accept-package-agreements --accept-source-agreements`
-  (fallback: `choco install nmap -y` if Chocolatey is present).
+- Windows: `winget install -e --id Insecure.Nmap` (fallback: `choco install nmap -y`).
 - Debian/Ubuntu: `sudo apt-get update && sudo apt-get install -y nmap`.
 - RHEL/CentOS/Fedora: `sudo dnf install -y nmap` (or `yum`).
 - macOS: `brew install nmap`.
 
-Emit **one** ability with one stage. Re-verify with `nmap --version` as the
-last command of the same stage (chained with `&&`).
+Chain `nmap --version` at the end of the same stage to re-verify. Emit **one** ability.
 
 ### Step 4 — Host discovery / live-asset map
 
-Goal: produce the list of live hosts inside `network.cidr`. Stay inside the
-foothold's own subnet — do **not** widen to /16 or scan public ranges.
+Goal: list live hosts in `network.cidr`. Stay inside the foothold's own subnet.
+If the sweep returns zero hosts, re-run once with `-PR` (ARP) before giving up.
 
-```
-nmap -sn -PE -PP -PS21,22,80,443,445,3389 -PA80,443,3389 \
-     -oA <artifacts>/nmap_hostsweep <network.cidr>
-```
+See `tool-commands.md § Step 4` for the exact nmap invocation and `.gnmap` parse logic.
 
-(`-sn` = ping sweep only, no port scan; `-PE/-PP` = ICMP echo + timestamp; the
-`-PS/-PA` lists catch hosts that drop ICMP.)
-
-Save into memory as `network.live_hosts` = list of IPs and (where resolvable)
-hostnames. This is the input to Step 5.
+Save: `network.live_hosts` = list of IPs + hostnames (where resolvable).
 
 ### Step 5 — Service / port enumeration on live hosts
 
-Goal: for each live host from Step 4, learn what services are listening. Use
-the **top-1000-ports TCP scan with version detection** — broad enough to spot
-DC ports, narrow enough to finish in budget.
+Goal: learn what services are listening on every live host. `-sV` is mandatory —
+it produces the service+version data that drives the DC gate in Step 7.
+Non-privileged shells substitute `-sT` (TCP connect) for `-sS`.
 
-```
-nmap -sS -sV -Pn --top-ports 1000 --version-intensity 5 \
-     -oA <artifacts>/nmap_services -iL <live_hosts_file>
-```
+See `tool-commands.md § Step 5` for the full nmap invocation and flag rationale.
 
-`-sV` is mandatory — it is what produces the service+version data that drives
-Step 6 and the AD-pivot decision. Save into memory as `network.services`
-(per-host list of `{port, proto, service, product, version}`).
+Save: `network.services` (per-host `{port, proto, service, product, version}`).
 
 ### Step 6 — Targeted version & banner deepening
 
-Run **per high-value port** found in Step 5. Pick the smallest scan that still
-answers the question:
+Run **per high-value port** found in Step 5. One ability stage per port type.
+Pick the script template from `tool-commands.md § Step 6` that matches the port.
 
-- SMB on 445 → `nmap -p445 --script smb-os-discovery,smb2-security-mode <ip>`
-- Kerberos on 88 → `nmap -p88 -sV <ip>` (and only if a user list is available,
-  optionally `--script krb5-enum-users`).
-- LDAP on 389/636 → `nmap -p389,636 --script ldap-rootdse <ip>`
-- HTTP(S) on 80/443/8080/8443 → `nmap -p<port> --script http-title,http-server-header,http-methods <ip>`
-- RDP on 3389 → `nmap -p3389 --script rdp-enum-encryption,rdp-ntlm-info <ip>`
+Save: `network.fingerprints.<ip>.<port>`.
 
-Each scan is its own ability stage. Save findings under
-`network.fingerprints.<ip>.<port>`.
+### Step 7 — DC gate (pivot decision)
 
-### Step 7 — Pivot decision (Active Directory gate)
-
-Inspect Step 5 / Step 6 output. Pivot into AD enumeration **only** if at least
-two of the following are true on the same host:
+Inspect Step 5 / Step 6 output. A domain controller is confirmed when **at
+least two** of the following hold on the same host:
 
 - TCP/88 open (Kerberos)
 - TCP/389 or TCP/636 open (LDAP / LDAPS)
-- TCP/445 open (SMB) **and** that host's hostname looks like a DC
-  (matches `*DC*`, `*dc0*`, ends in `$`) OR SMB OS discovery reports a server
-  OS edition
+- TCP/445 open **and** hostname matches `*DC*` / `*dc0*` / ends in `$`, OR SMB
+  OS discovery reports a Server edition
 
-If the gate passes, the *next* ability may run lightweight, unauthenticated AD
-recon (e.g. `crackmapexec smb <dc_ip>`, `ldapsearch -x -H ldap://<dc_ip> -s base`,
-`enum4linux-ng -A <dc_ip>`). Heavy collectors (BloodHound, SharpHound,
-Certipy) are **not** to be queued by this skill — they belong to the
-`accessing-credentials` / `escalating-privileges` skills once a usable
-credential exists.
+**Gate passes** → set `network.has_domain_controller = true`, record
+`network.dc_ip` and `network.dc_ports`; continue to Phase B.
 
-If the gate fails, set `network.has_domain_controller = false` and finish the
-skill. The router will pick a different next phase.
+**Gate fails** → set `network.has_domain_controller = false`; skip Phase B and
+apply the non-domain pivot conditions below.
+
+---
+
+## Phase B — Active Directory Enumeration (runs only if DC gate passes)
+
+**Re-run this entire phase from Step 8 on every new machine reached via lateral movement.**
+Each step maps to one or more D-numbered techniques from `techniques.md`.
+Emit **one** ability per step; steps run sequentially unless marked as parallelisable.
+
+### Step 8 — Lightweight unauthenticated DC probe (D11)
+
+Confirm DC identity, domain name, and SMB signing before any authenticated tool.
+See `tool-commands.md § Step 8`.
+
+Save: `domain.name`, `domain.dc_hostname`, `domain.functional_level`,
+`domain.smb_signing_required`.
+
+### Step 9 — BloodHound full collection (D1)
+
+**Run on EVERY new machine. Reveals DA paths, ACL abuses, sessions, Kerberoastable accounts.**
+
+Select the appropriate collector (SharpHound / bloodhound-python / azurehound)
+based on foothold platform and credential state. Run BloodHound GUI queries after
+ingest. See `tool-commands.md § Step 9`.
+
+Save: `ad.bloodhound_zip` path. Feeds D2, D5, D7, D9, D10, D16.
+
+Cycle / next:
+- DA path found → `moving-laterally` (skip remaining steps)
+- Kerberoastable accounts found → Step 16, then `accessing-credentials`
+- GenericAll / WriteDACL found → Step 15, then `accessing-credentials`
+- After lateral move to new machine → re-run from this step on that machine
+
+### Step 10 — Domain Controller / FSMO role discovery (D11)
+
+Enumerate all DCs and their FSMO roles. See `tool-commands.md § Step 10`.
+
+Save: `domain.dcs` list with IPs and FSMO roles.
+
+### Step 11 — Domain user & group enumeration (D6)
+
+Dump all users, groups, and memberships. Flag privileged groups:
+Domain Admins, Enterprise Admins, Schema Admins, Backup Operators, Account Operators.
+See `tool-commands.md § Step 11`.
+
+Save: `ad.users` count, `ad.groups` list, `ad.privileged_groups`.
+
+### Step 12 — Password policy discovery (D15)
+
+**Run BEFORE any password spraying. Abort spray if lockout threshold ≤ 3.**
+
+Retrieve default and fine-grained password policies. Compute safe spray rate:
+1 attempt per (ObservationWindow + 5 min buffer). See `tool-commands.md § Step 12`.
+
+Save: `domain.password_policy` (lockout_threshold, observation_window_min,
+min_length, complexity).
+
+### Step 13 — DNS enumeration (D13)
+
+Dump all AD-integrated DNS records to find hidden hosts and new subnets.
+New segment found → pivot (tunneling) → restart Phase A in new segment.
+See `tool-commands.md § Step 13`.
+
+Save: `ad.dns_records`. Cross-reference with `network.live_hosts`.
+
+### Step 14 — Forest & trust relationship mapping (D7)
+
+Map all domain trusts and forest relationships. Flag bi-directional external trusts
+as high-value cross-domain pivot paths. See `tool-commands.md § Step 14`.
+
+Save: `domain.trusts` list with direction and type.
+
+### Step 15 — ACL / permission abuse discovery (D2)
+
+Query BloodHound data from Step 9 first; supplement with direct PowerView / daclenum
+queries. Target rights: GenericAll, WriteDACL, WriteOwner, ForceChangePassword,
+GenericWrite, AddMember, AllExtendedRights. See `tool-commands.md § Step 15`.
+
+Save: `ad.acl_abuse_paths` list (source principal → target object → right).
+
+Cycle / next:
+- WriteDACL on domain object → `accessing-credentials` (grant self DCSync)
+- GenericAll on group → add self to elevated group
+- GenericWrite on computer → `moving-laterally` (RBCD)
+
+### Step 16 — Kerberoastable & AS-REP roastable discovery (D9)
+
+**Kerberoast requires one domain user. AS-REP roast requires zero credentials.**
+
+Enumerate SPN accounts and DONT_REQ_PREAUTH accounts. Write hashes to artifact files
+ready for Hashcat (mode 13100 for RC4 Kerberoast; mode 18200 for AS-REP).
+See `tool-commands.md § Step 16`.
+
+Save: `ad.kerberoastable_accounts`, `ad.asrep_roastable_accounts`.
+Non-empty → immediately recommend `accessing-credentials`.
+
+### Step 17 — Delegation discovery (D16)
+
+Find all unconstrained, constrained, and RBCD-configured computer objects.
+See `tool-commands.md § Step 17`.
+
+Save: `ad.unconstrained_delegation`, `ad.constrained_delegation`, `ad.rbcd`.
+
+### Step 18 — GPO enumeration (D10)
+
+Enumerate all GPOs and their local-group mappings. Flag GPOs linked to OUs
+containing DCs or high-value servers. See `tool-commands.md § Step 18`.
+
+Save: `ad.gpos` list.
+
+### Step 19 — AD CS vulnerability discovery (D3)
+
+**ESC1 = any domain user can request a cert as DA. Most impactful single privesc in modern AD.**
+
+Run certipy (Linux) or Certify (Windows). Check for ESC8 web enrollment.
+See `tool-commands.md § Step 19`.
+
+Save: `ad.adcs_vulns` list of template names + ESC class.
+Non-empty → immediately recommend `escalating-privileges`
+(ESC1/4/6/8) or `accessing-credentials` (ESC9/10/13).
+
+### Step 20 — SMB & network share enumeration (D4)
+
+**SYSVOL always readable. GPP cpassword = instant credential. Snaffler auto-classifies findings.**
+
+Enumerate readable shares and spider for credential-bearing files.
+Check SYSVOL for GPP cpassword values. See `tool-commands.md § Step 20`.
+
+Save: `ad.shares` list with UNC paths. Flag credential-bearing extensions.
+GPP cpassword found → `accessing-credentials` (GPP decrypt).
+
+### Step 21 — Logged-on user & admin session hunting (D5)
+
+**DA session on reachable host = steal token or ticket without cracking anything.**
+
+Hunt for privileged sessions across the domain. Use `-Stealth` to reduce noise.
+See `tool-commands.md § Step 21`.
+
+Save: `ad.da_sessions` (hosts where DA or high-value accounts have active sessions).
+DA session found → `moving-laterally` (token impersonation / PTT).
+
+### Step 22 — Process & service discovery (D12)
+
+Run on the foothold host and any host where Step 21 found a privileged session.
+Check for AV/EDR products before running any further noisy tools.
+See `tool-commands.md § Step 22`.
+
+Save: `host.av_edr`, `host.da_processes`.
+EDR detected → flag for `defense-evasion` (AMSI + EDR bypass) before continuing.
+
+### Step 23 — Azure AD / hybrid enumeration (D14)
+
+Run **only** if Step 8 or DNS records reveal an Azure AD Connect server, hybrid
+join indicators, or an `*.onmicrosoft.com` UPN suffix. See `tool-commands.md § Step 23`.
+
+Save: `ad.azure_tenant_id`, `ad.hybrid_join_hosts`, `ad.aad_connect_server`.
+
+### Step 24 — LAPS & gMSA reader discovery (D20)
+
+Find computers where the current user can read the LAPS password attribute and
+identify gMSA accounts with readable managed passwords.
+See `tool-commands.md § Step 24`.
+
+Save: `ad.laps_readable_hosts`, `ad.gmsa_accounts`.
+Non-empty → `accessing-credentials`.
+
+### Step 25 — MSSQL enumeration (D17)
+
+Run **only** if Step 5 / Step 6 found TCP/1433 or TCP/1434 on any host.
+Discover accessible instances and crawl linked-server chains.
+See `tool-commands.md § Step 25`.
+
+Save: `ad.mssql_servers`, `ad.mssql_links`.
+Linked server with `sysadmin` on remote instance → `moving-laterally`.
+
+### Step 26 — Exchange / mail enumeration (D18)
+
+Run **only** if Step 5 found TCP/443 with OWA banner, TCP/25, or TCP/587.
+See `tool-commands.md § Step 26`.
+
+Save: `ad.exchange_hosts`, `ad.mailbox_secrets_found` (bool).
+
+### Step 27 — Printer & spooler discovery (D19)
+
+Run **only** if Step 5 found TCP/445 + TCP/135 on non-DC hosts.
+Hosts with spooler + unconstrained delegation (Step 17) → coercion targets.
+See `tool-commands.md § Step 27`.
+
+Save: `ad.spooler_enabled_hosts`.
+
+---
 
 ## Preconditions
 
 - `foothold.platform` is set (`windows`, `linux`, or `darwin`).
 - `foothold.hostname` / `foothold.ip_address` populated by foothold resolution.
 - Outbound ICMP / TCP to the foothold's own subnet is permitted by scope.
+- For Phase B Steps 9–27: at least one set of domain credentials available in
+  memory (`creds.domain_user` + `creds.domain_pass`), or the foothold is already
+  domain-joined and running as a domain user.
 
 ## Hard rules
 
-- One step per ability. Don't fuse Steps 1 and 4 into a single 3-line stage.
+- One step per ability. Do not fuse steps.
 - Never use a placeholder like `<target>` in `command_template` — substitute
-  the actual CIDR / IP / hostname from memory or foothold.
+  the actual CIDR / IP / hostname from memory or foothold context.
 - Match the host: Windows abilities use executor `cmd` or `psh`; Linux/macOS
-  use `sh` or `bash`. Don't ship `apt-get` to a Windows host or `winget` to
-  Linux.
-- Stay inside `network.cidr`. Scanning a /16 you weren't given is out of scope.
-- Do not queue BloodHound, SharpHound, Certipy, PowerView, or any other
-  AD-heavy tooling from this skill. The pivot in Step 7 only allows
-  lightweight, unauthenticated DC probes.
+  use `sh` or `bash`. Do not ship `apt-get` to a Windows host or `winget` to Linux.
+- Stay inside `network.cidr` for Phase A scanning. Do not widen to /16 or scan public ranges.
+- Phase B Steps 9–27 must not run until Step 7 sets `network.has_domain_controller = true`.
+- Do not queue Phase B tools during Phase A. The DC gate is not optional.
+- Optional-priority techniques (D17, D18, D19, D20) only emit if the relevant
+  service or condition is confirmed in earlier steps.
+- Run AMSI bypass (`defense-evasion`) before any PowerShell-based tools in Phase B.
 
 ## Stage goal (commit criteria)
 
@@ -187,39 +397,66 @@ Signal `success` only when **all** hold:
 - `recon.nmap_available == true` (Step 2, possibly after Step 3).
 - `network.live_hosts` is a non-empty list (Step 4).
 - `network.services` populated for every live host (Step 5).
-- Step 7 has either set `network.has_domain_controller = true` (with the DC's
-  IP and detected ports) or set it explicitly to `false`.
+- Step 7 has set `network.has_domain_controller` to `true` or `false`.
+- If `true`: all Critical-priority Phase B steps (8, 9, 12, 15, 16, 19) have
+  run and their memory keys are populated.
 
 ## MITRE mapping for emitted abilities
 
-| Step | MITRE technique                                  | tactic |
-|------|--------------------------------------------------|--------|
-| 1    | T1016 — System Network Configuration Discovery   | TA0007 |
-| 2-3  | T1518 — Software Discovery / Install             | TA0007 |
-| 4    | T1018 — Remote System Discovery                  | TA0007 |
-| 5    | T1046 — Network Service Discovery                | TA0007 |
-| 6    | T1046 — Network Service Discovery (deep)         | TA0007 |
-| 7    | T1087.002 — Domain Account (only if pivot fires) | TA0007 |
-
-Pick the row that matches the step you are emitting; never use a generic
-parent technique when a specific one applies.
+| Step | Technique ID          | Technique name                            | Tactic |
+|------|-----------------------|-------------------------------------------|--------|
+| 1    | T1016                 | System Network Configuration Discovery    | TA0007 |
+| 2–3  | T1518                 | Software Discovery / Install              | TA0007 |
+| 4    | T1018                 | Remote System Discovery                   | TA0007 |
+| 5    | T1046                 | Network Service Discovery                 | TA0007 |
+| 6    | T1046                 | Network Service Discovery (deep)          | TA0007 |
+| 7    | —                     | Gate / router (no MITRE action)           | —      |
+| 8    | T1018                 | Domain Controller Discovery               | TA0007 |
+| 9    | T1087.002             | BloodHound Collection                     | TA0007 |
+| 10   | T1018                 | FSMO Role Discovery                       | TA0007 |
+| 11   | T1087.002             | Domain User / Group Enumeration           | TA0007 |
+| 12   | T1201                 | Password Policy Discovery                 | TA0007 |
+| 13   | T1590.002             | DNS Enumeration                           | TA0007 |
+| 14   | T1482                 | Forest & Trust Mapping                    | TA0007 |
+| 15   | T1069.002             | ACL / Permission Abuse Discovery          | TA0007 |
+| 16   | T1558.003 / T1558.004 | Kerberoast / AS-REP Roast Discovery       | TA0006 |
+| 17   | T1558                 | Delegation Discovery                      | TA0007 |
+| 18   | T1615                 | GPO Enumeration                           | TA0007 |
+| 19   | T1649                 | AD CS Vulnerability Discovery             | TA0007 |
+| 20   | T1135                 | SMB & Share Enumeration                   | TA0007 |
+| 21   | T1033                 | Logged-on User / Admin Session Hunting    | TA0007 |
+| 22   | T1057 / T1007         | Process / Service Discovery               | TA0007 |
+| 23   | T1538                 | Azure AD / Hybrid Enumeration             | TA0007 |
+| 24   | T1555                 | LAPS / gMSA Reader Discovery              | TA0006 |
+| 25   | T1046                 | MSSQL Enumeration                         | TA0007 |
+| 26   | T1087                 | Exchange / Mail Enumeration               | TA0007 |
+| 27   | T1187                 | Printer / Spooler Discovery               | TA0007 |
 
 ## Pivot conditions (set `recommended_next`)
 
-- DC found + at least one user/computer enumerated → `accessing-credentials`
-  (target SPN roasting / AS-REP roasting first, cheapest).
-- No DC, but RDP/SMB open on a workstation with weak banner → `moving-laterally`.
-- No DC, no obviously vulnerable service → `establishing-persistence` on the
-  current foothold while waiting for more scope.
-- Nmap genuinely cannot be installed (no admin, no package manager reachable)
-  → `blocked`; escalate to human.
+- BloodHound collected + DA path found → `moving-laterally` (skip remaining steps).
+- Kerberoastable / AS-REP accounts found → `accessing-credentials` (offline crack first).
+- AD CS ESC vulnerabilities found → `escalating-privileges` (certipy / certify abuse).
+- ACL abuse paths to DA found → `accessing-credentials` (DCSync / ForceChangePassword).
+- DA session found on reachable host (Step 21) → `moving-laterally` (token impersonation / PTT).
+- Unconstrained delegation + spooler enabled (Steps 17 + 27) → `moving-laterally` (coercion).
+- LAPS / gMSA readable by current user → `accessing-credentials`.
+- GPP cpassword found in SYSVOL (Step 20) → `accessing-credentials` (GPP decrypt).
+- Azure AD Connect / MSOL account found (Step 23) → `moving-laterally` (cloud).
+- No DC confirmed, RDP / SMB open on workstation → `moving-laterally`.
+- No DC, no obviously vulnerable service → `establishing-persistence` on current foothold.
+- nmap cannot be installed (no admin, no package manager) → `blocked`; escalate to human.
+- EDR detected in Step 22 → `defense-evasion` (AMSI + EDR bypass) before continuing Phase B.
 
 ## Evidence to capture
 
 - Raw nmap output: `-oA` to `<artifacts>/<step>/nmap_*.{nmap,gnmap,xml}`.
+- BloodHound zip: `<artifacts>/bloodhound/<timestamp>_BloodHound.zip`.
+- All tool output files: stored under `<artifacts>/<step_name>/`.
 - Parsed live-host list and per-host service map merged into session memory.
-- One-line `finding` per high-value service (e.g. "10.0.0.5:445 SMB Windows
-  Server 2019 signing=disabled") with `raw_output_ref` pointer.
-
-Full per-step command templates and parser hints:
-[reference/tool-commands.md](reference/tool-commands.md).
+- One-line `finding` per high-value discovery with `raw_output_ref` pointer, e.g.:
+  - `"10.0.0.5 — ESC1 vulnerable template 'UserCert' — certipy"`
+  - `"10.0.0.12:445 SMB Windows Server 2019 signing=disabled"`
+  - `"svc_sql — Kerberoastable SPN: MSSQLSvc/db01.corp.local:1433 — RC4"`
+  - `"da_user — active session on WORKSTATION07 — Invoke-UserHunter"`
+  - `"SYSVOL Groups.xml — cpassword found — domain-wide GPO"`

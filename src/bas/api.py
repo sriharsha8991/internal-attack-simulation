@@ -13,7 +13,7 @@ Endpoints:
     GET    /engagements/{id}                     detail
     GET    /engagements/{id}/log                 audit log
     DELETE /engagements/{id}                     drop from disk + registry
-    POST   /engagements/{id}/results             webhook receiver
+    POST   /results                              webhook receiver
     GET    /engagements/{id}/artifacts            saved ability/adversary specs
     GET    /phases                                kill-chain phases
     GET    /skills                                skill catalogue

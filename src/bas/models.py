@@ -73,6 +73,7 @@ class AbilityCreate(BaseModel):
     requires_approval: bool | None = False
     tags: list[str] | None = None
     created_by: str = "ai"
+    engagement_id: str | None = None
 
 
 class AbilityResponse(AbilityCreate):
@@ -125,6 +126,7 @@ class AdversaryCreate(BaseModel):
     requires_approval: bool | None = False
     is_tested: bool | None = False
     created_by: str = "ai"
+    engagement_id: str | None = None
 
 
 class AdversaryResponse(AdversaryCreate):

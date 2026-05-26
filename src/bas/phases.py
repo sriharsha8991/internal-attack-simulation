@@ -6,38 +6,63 @@ by those canonical names so the API never needs to know individual skill names.
 
 Phase aliases are normalised in `_normalise_phase` so common synonyms work
 without the agent having to memorise our internal names.
+
+The ``Phase`` enum is a ``str`` subclass, so every existing string comparison
+(``phase == "discovery"``, ``phase in completed_list``, dict key lookups)
+continues to work without changes across the codebase.
 """
 
 from __future__ import annotations
 
+from enum import Enum
+
 from .tools.skill_tool import SkillTool
 
-# Common alternative names → canonical stage. Lowercase, hyphen-normalised.
-_ALIASES: dict[str, str] = {
-    "recon": "discovery",
-    "reconnaissance": "discovery",
-    "discover": "discovery",
-    "discovery": "discovery",
-    "privilege-escalation": "privesc",
-    "privilegeescalation": "privesc",
-    "priv-esc": "privesc",
-    "privesc": "privesc",
-    "credentials": "credaccess",
-    "credential-access": "credaccess",
-    "credaccess": "credaccess",
-    "lateral-movement": "lateral",
-    "lateral": "lateral",
-    "persistence": "persistence",
-    "defense-evasion": "defevasion",
-    "defence-evasion": "defevasion",
-    "defevasion": "defevasion",
-    "evasion": "defevasion",
-    "impact": "impact",
+
+class Phase(str, Enum):
+    """Canonical kill-chain phases — the contract between backend and orchestrator.
+
+    Being a ``str`` enum, each member compares equal to its plain-string value:
+    ``Phase.DISCOVERY == "discovery"`` is ``True``.
+    """
+
+    DISCOVERY = "discovery"
+    PRIVESC = "privesc"
+    CREDACCESS = "credaccess"
+    LATERAL = "lateral"
+    PERSISTENCE = "persistence"
+    DEFEVASION = "defevasion"
+    IMPACT = "impact"
+
+
+# Common alternative names → canonical phase enum value.
+_ALIASES: dict[str, Phase] = {
+    "recon": Phase.DISCOVERY,
+    "reconnaissance": Phase.DISCOVERY,
+    "discover": Phase.DISCOVERY,
+    "discovery": Phase.DISCOVERY,
+    "privilege-escalation": Phase.PRIVESC,
+    "privilegeescalation": Phase.PRIVESC,
+    "priv-esc": Phase.PRIVESC,
+    "privesc": Phase.PRIVESC,
+    "credentials": Phase.CREDACCESS,
+    "credential-access": Phase.CREDACCESS,
+    "credaccess": Phase.CREDACCESS,
+    "lateral-movement": Phase.LATERAL,
+    "lateral": Phase.LATERAL,
+    "persistence": Phase.PERSISTENCE,
+    "defense-evasion": Phase.DEFEVASION,
+    "defence-evasion": Phase.DEFEVASION,
+    "defevasion": Phase.DEFEVASION,
+    "evasion": Phase.DEFEVASION,
+    "impact": Phase.IMPACT,
 }
 
 
 def _normalise_phase(name: str) -> str:
-    return _ALIASES.get(name.strip().lower(), name.strip().lower())
+    """Return the canonical phase name for *name* (lowercase, alias-resolved)."""
+    key = name.strip().lower()
+    return _ALIASES.get(key, key)  # type: ignore[return-value]  # Phase IS str
 
 
 def build_phase_index(skill_tool: SkillTool) -> dict[str, list[str]]:

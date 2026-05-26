@@ -30,6 +30,51 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Completion notification — tells the BAS backend all phases are done
+# ---------------------------------------------------------------------------
+
+
+def _notify_completion(engagement_id: str, status: str) -> None:
+    """Send a terminal ``POST /ai/operation-feedback`` with ``loop_status='done'``.
+
+    This lets the backend know the orchestrator is finished and will not push
+    any more abilities or feedback for this engagement.
+    """
+    try:
+        bas = _state.get("bas")
+        if bas is None or bas.feedback._dry:
+            return
+
+        from .client.feedback import AIFeedbackPayload
+
+        payload = AIFeedbackPayload(
+            source="operation-analyzer",
+            loop_status="done",
+            changes=[],
+        )
+        payload_dict = payload.model_dump(mode="json")
+        payload_dict["engagement_id"] = engagement_id
+        payload_dict["engagement_status"] = status
+
+        bas.feedback._t.post_json(
+            "/ai/operation-feedback",
+            json=payload_dict,
+        )
+        logger.info(
+            "[completion] notified backend: engagement=%s status=%s",
+            engagement_id,
+            status,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Best-effort — don't let notification failure crash the worker.
+        logger.warning(
+            "[completion] failed to notify backend for engagement=%s: %s",
+            engagement_id,
+            exc,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Dry-run stub planner (no LLM key needed)
 # ---------------------------------------------------------------------------
 
@@ -207,6 +252,7 @@ def _run_engagement(engagement_id: str) -> None:
             (record.get("state") or {}).get("completed_stages"),
             (record.get("state") or {}).get("iteration"),
         )
+        _notify_completion(engagement_id, "completed")
     except GraphInterrupt:
         # Graph paused at interrupt() — engagement is waiting for backend
         # results. Thread exits; webhook resume handles continuation.
@@ -219,6 +265,7 @@ def _run_engagement(engagement_id: str) -> None:
         record["status"] = "failed"
         record["error"] = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
         logger.exception("[engagement %s] FAILED", engagement_id)
+        _notify_completion(engagement_id, "failed")
     finally:
         if record.get("status") != "awaiting_results":
             record["finished_at"] = now_iso()
@@ -258,6 +305,7 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
         record["finished_at"] = now_iso()
         store.save(record)
         logger.info("[resume] engagement %s completed", engagement_id)
+        _notify_completion(engagement_id, "completed")
     except GraphInterrupt:
         # Graph paused again (next phase push) — still awaiting results
         record["status"] = "awaiting_results"
@@ -270,3 +318,4 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
         record["finished_at"] = now_iso()
         store.save(record)
         logger.exception("[resume] engagement %s failed", engagement_id)
+        _notify_completion(engagement_id, "failed")

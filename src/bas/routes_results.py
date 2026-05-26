@@ -1,6 +1,6 @@
 """Webhook receiver for BAS backend execution results.
 
-Single endpoint: ``POST /engagements/{engagement_id}/results``
+Single endpoint: ``POST /results``
 
 Accepts the raw JSON the backend POSTs after an operation completes, validates
 it, and stores it idempotently on disk. Status transitions and graph resume
@@ -9,7 +9,6 @@ are handled by later phases — this module only persists.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from typing import Any
@@ -18,6 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from .persistence import ResultStore, RunStore
+from .schemas import OperationResultRequest, ResultAcceptedResponse
 
 logger = logging.getLogger(__name__)
 
@@ -26,24 +26,38 @@ MAX_RESULT_PAYLOAD_BYTES = 10 * 1024 * 1024  # 10 MB default
 router = APIRouter(tags=["results"])
 
 
-@router.post("/engagements/{engagement_id}/results")
+@router.post(
+    "/results",
+    response_model=ResultAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        200: {"description": "Duplicate result (already received)", "model": ResultAcceptedResponse},
+        404: {"description": "Engagement not found"},
+        409: {"description": "Engagement not in awaiting_results or running status"},
+        422: {"description": "Invalid JSON or missing/invalid fields"},
+    },
+    summary="Receive execution results from BAS backend",
+    description=(
+        "Accept execution results POSTed by the BAS backend after abilities are "
+        "executed on the target agent. The `engagement_id` (from `POST /engagements`) "
+        "and `operation_id` are both in the request body.\n\n"
+        "**Idempotent**: duplicate `operation_id` returns 200 without re-processing."
+    ),
+)
 async def receive_results(
-    engagement_id: str,
-    request: Request,
+    payload: OperationResultRequest,
     background_tasks: BackgroundTasks,
 ) -> Any:
-    """Accept execution results POSTed by the BAS backend.
-
-    Idempotent: duplicate ``operation_id`` returns 200 without re-processing.
-    Status transitions are owned by graph nodes, not this endpoint.
-    """
     # Resolve stores from process-global state.
     from .bootstrap import _bootstrap, _state
     _bootstrap()
     store: RunStore = _state["store"]
     results_store: ResultStore = _state["results_store"]
 
-    # 1. Engagement must exist
+    # 1. Extract engagement_id from body
+    engagement_id = payload.engagement_id
+
+    # 2. Engagement must exist
     record = store.get(engagement_id)
     if record is None:
         raise HTTPException(
@@ -51,7 +65,7 @@ async def receive_results(
             f"engagement {engagement_id!r} not found",
         )
 
-    # 2. Engagement must be waiting for results
+    # 3. Engagement must be waiting for results
     eng_status = record.get("status")
     if eng_status not in ("awaiting_results", "running"):
         raise HTTPException(
@@ -59,30 +73,8 @@ async def receive_results(
             f"engagement status is {eng_status!r}; expected 'awaiting_results'",
         )
 
-    # 3. Size guard
-    body = await request.body()
-    if len(body) > MAX_RESULT_PAYLOAD_BYTES:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"payload exceeds {MAX_RESULT_PAYLOAD_BYTES // (1024 * 1024)} MB limit",
-        )
-
-    # 4. Parse JSON
-    try:
-        payload = json.loads(body)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"invalid JSON: {exc}",
-        )
-
-    # 5. Extract and validate operation_id
-    operation_id = payload.get("operation_id")
-    if not operation_id:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "missing 'operation_id' in request body",
-        )
+    # 4. Validate operation_id format
+    operation_id = payload.operation_id
     try:
         uuid.UUID(str(operation_id))
     except ValueError:
@@ -92,23 +84,25 @@ async def receive_results(
         )
     operation_id = str(operation_id)
 
+    # 5. Serialize payload to dict for storage
+    payload_dict = payload.model_dump(mode="json")
+
     # 6. Idempotency — already received this operation's result
     if results_store.exists(engagement_id, operation_id):
         return {"status": "already_received", "operation_id": operation_id}
 
     # 7. Save to disk
-    results_store.save(engagement_id, operation_id, payload)
+    results_store.save(engagement_id, operation_id, payload_dict)
     logger.info(
-        "[results] saved result for engagement=%s operation=%s (%d bytes)",
+        "[results] saved result for engagement=%s operation=%s",
         engagement_id,
         operation_id,
-        len(body),
     )
 
     # 8. Schedule graph resume in the background (Issue #4 fix) so this
     #    response returns 202 immediately without blocking on LLM calls.
     from .worker import _resume_graph
-    background_tasks.add_task(_resume_graph, engagement_id, payload)
+    background_tasks.add_task(_resume_graph, engagement_id, payload_dict)
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
