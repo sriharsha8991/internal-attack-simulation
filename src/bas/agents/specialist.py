@@ -328,11 +328,59 @@ class LLMPlanner:
         except Exception as exc:  # noqa: BLE001
             logger.warning("[plan/self-critique] failed: %s; using original plan", exc)
 
-        # ---- code-execution validation (only on retry) ---------------------
-        # Use Gemini's code_execution tool to validate command syntax. Only
-        # triggered when re-planning (feedback / issues_to_fix), since the
-        # first attempt already has self-critique and the evaluator as gates.
-        # This avoids burning a code_execution call on every clean first pass.
+        # ---- shell-native syntax validation (every plan) -------------------
+        # Fast subprocess call (< 100ms per command) using real shell parsers.
+        # Catches broken syntax that the LLM self-critique cannot detect.
+        from ..tools.command_validator import format_errors, validate_plan
+
+        shell_results = validate_plan(plan)
+        shell_errors = [v for v in shell_results if not v.valid]
+        if shell_errors:
+            error_report = format_errors(shell_errors)
+            logger.warning(
+                "[plan/shell-validate] %d syntax error(s) found:\n%s",
+                len(shell_errors),
+                error_report,
+            )
+            # Feed shell errors back to the LLM for one re-generation attempt.
+            import json as _json2
+
+            user_payload2 = {
+                "foothold": state.get("foothold", {}),
+                "memory": state.get("memory", {}),
+                "completed_stages": state.get("completed_stages", []),
+                "run_id": state.get("run_id"),
+            }
+            fix_parts = [
+                "Emit a SpecialistPlan as JSON matching the schema.",
+                "Session context follows:",
+                "",
+                _json2.dumps(user_payload2, indent=2, default=str),
+                "",
+                "--- SHELL SYNTAX ERRORS (must fix all) ---",
+                "The shell parser found these syntax errors in your commands.",
+                "Fix every one. Do NOT change the plan structure, only fix the commands.",
+                "",
+                error_report,
+            ]
+            fix_msgs = [
+                LLMMessage(role="system", content=system),
+                LLMMessage(role="user", content="\n".join(fix_parts)),
+            ]
+            try:
+                plan = self._llm.generate_structured(
+                    fix_msgs, SpecialistPlan, grounding="skip",
+                    temperature=self._temperature,
+                )
+                logger.info("[plan/shell-validate] re-generated plan after syntax fix")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[plan/shell-validate] re-gen failed: %s; using plan as-is", exc
+                )
+
+        # ---- code-execution validation (LLM semantic check, retries only) --
+        # Gemini code_execution validates logic (wrong flags, tool semantics).
+        # Only on retries to save the LLM call on clean first passes.
         if is_retry:
             try:
                 plan = self._validate_commands(plan, state, skill, system)
@@ -377,6 +425,19 @@ class LLMPlanner:
         "     offensive tool names in the command string that AV/EDR\n"
         "     would signature-match. These should use renamed binaries\n"
         "     or in-memory execution.\n"
+        "  9. SHELL SYNTAX: Every command_template MUST be syntactically\n"
+        "     valid for its executor. Common mistakes to flag:\n"
+        "     - PowerShell: unbalanced { } ( ) or quotes; bare $_ outside\n"
+        "       a pipeline block (ForEach-Object, Where-Object); missing\n"
+        "       semicolons between statements; unescaped embedded quotes\n"
+        "       (use backtick ` to escape); broken regex patterns.\n"
+        "     - Bash/sh: unbalanced quotes or backticks; missing command\n"
+        "       separators (;, &&, ||); unclosed if/for/while blocks;\n"
+        "       unescaped special characters in strings.\n"
+        "     - Cmd: unbalanced parentheses or quotes; dangling pipes or\n"
+        "       redirects; incorrect FOR /F syntax.\n"
+        "     If in doubt, simplify: break a complex one-liner into\n"
+        "     multiple stages rather than risk a syntax error.\n"
     )
 
     def _self_critique(
@@ -626,6 +687,27 @@ def push_specialist(
     skill_name = state.get("next_stage") or ""
     if not skill_name or skill_name == "DONE" or not skill_tool.has(skill_name):
         return PushResult(skill=skill_name, success=False, error="no skill to push")
+
+    # ---- 1b. Shell-native syntax validation (pre-push gate) -----------------
+    # Parse every command_template through the real shell parser to catch
+    # syntax errors before they reach the target agent.
+    from ..tools.command_validator import format_errors, validate_plan
+
+    validations = validate_plan(plan)
+    syntax_errors = [v for v in validations if not v.valid]
+    if syntax_errors:
+        error_report = format_errors(syntax_errors)
+        logger.warning(
+            "[push] %d command(s) have syntax errors:\n%s",
+            len(syntax_errors),
+            error_report,
+        )
+    # Log warnings (placeholders, skipped checks) even for valid commands
+    warnings = [v for v in validations if v.warnings]
+    if warnings:
+        warn_report = format_errors(warnings)
+        if warn_report:
+            logger.info("[push] command validation warnings:\n%s", warn_report)
 
     # ---- 2 & 3. push abilities + stages -------------------------------------
     ability_ids: list[str] = []
