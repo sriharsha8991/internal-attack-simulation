@@ -19,6 +19,111 @@ session memory.
 
 ---
 
+## Step 0 — Machine context check (every machine, every hop)
+
+Run these **first** on every machine — initial foothold and every lateral-movement hop.
+All commands use only OS built-ins. No tools, no downloads, no installs.
+
+### 0.1 — Identity & privilege
+
+#### Windows (`cmd`)
+
+```
+whoami
+whoami /all
+whoami /groups
+whoami /priv
+```
+
+#### Linux (`sh`)
+
+```
+id && env | grep -i user
+```
+
+Parse for: `Domain Admins`, `Enterprise Admins`, `Administrators`, `SeImpersonatePrivilege`,
+`SeDebugPrivilege`, `SeBackupPrivilege`.
+
+---
+
+### 0.2 — Domain membership check
+
+#### Windows — fastest check (`cmd`)
+
+```
+wmic computersystem get Name,Domain,Workgroup,PartOfDomain /value
+```
+
+#### Windows — alternate (`cmd`)
+
+```
+systeminfo | findstr /B /C:"Domain"
+net config workstation | findstr /i "domain\|logon"
+```
+
+#### Windows (PowerShell)
+
+```
+(Get-WmiObject Win32_ComputerSystem).PartOfDomain
+(Get-WmiObject Win32_ComputerSystem).Domain
+```
+
+#### Linux (`sh`)
+
+```
+realm list 2>/dev/null || cat /etc/krb5.conf 2>/dev/null | grep default_realm
+```
+
+Parse:
+- `PartOfDomain=TRUE` → domain-joined; read `Domain` value → continue to 0.3.
+- `PartOfDomain=FALSE` → workgroup → save `host.domain_joined = false`; skip Phase B.
+
+---
+
+### 0.3 — DC and domain detail (domain-joined only)
+
+#### Windows (`cmd`)
+
+```
+echo %USERDOMAIN%
+echo %LOGONSERVER%
+nltest /dsgetdc:%USERDOMAIN%
+```
+
+#### Windows (PowerShell)
+
+```
+[System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain() | select Name,DomainControllers
+```
+
+#### Linux (`sh`)
+
+```
+cat /etc/krb5.conf 2>/dev/null | grep -E "default_realm|kdc"
+cat /etc/sssd/sssd.conf 2>/dev/null | grep -E "^domains|^ad_domain"
+```
+
+---
+
+### 0.4 — OS, hostname, and interfaces
+
+#### Windows (`cmd`)
+
+```
+hostname
+systeminfo | findstr /B /C:"OS Name" /C:"OS Version" /C:"System Type"
+ipconfig /all
+net localgroup administrators
+```
+
+#### Linux (`sh`)
+
+```
+uname -a && hostname -f && ip -o -4 addr show && cat /etc/os-release
+```
+
+---
+
 ## Phase A — Network Discovery
 
 ### Step 1 — Determine local network range

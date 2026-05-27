@@ -88,15 +88,159 @@ Build a factual, evidence-driven inventory of the network and — when a domain
 controller is confirmed in scope — a complete Active Directory attack-surface
 map covering all D1–D20 techniques from `reference/techniques.md`.
 
-**Phase A (Steps 1–7) is mandatory for every run.** Phase B (Steps 8–27) is
+** START HERE every time you land on a new machine. Map before you attack.**
+
+**Step 0 is mandatory on every machine — first foothold and every lateral-movement hop.**
+**Phase A (Steps 1–7) runs after Step 0 confirms the network range.** Phase B (Steps 8–27) is
 conditional: it fires only after Step 7 confirms a domain controller. Non-domain
 hosts discovered in Step 5 receive the standard service-fingerprinting path
 (Step 6) and are then routed to the appropriate lateral-movement skill.
 
-**Re-run Phase B (starting from Step 8) on every new machine reached via lateral movement.**
+**Core cycle from XMind Phase 4:**
+Each new machine → **Step 0** (context check) → **Phase A** (network scan) → **Phase B**
+(AD enumeration) → lateral move → repeat Step 0 on next machine.
 
 Per-step command templates and parser hints: [reference/tool-commands.md](reference/tool-commands.md).
 Full technique catalogue with tool selection guidance: [reference/techniques.md](reference/techniques.md).
+
+---
+
+## Step 0 — Machine context check (runs on EVERY machine, including lateral-movement hops)
+
+**Goal: determine within seconds whether the new machine is domain-joined, which domain
+it belongs to, who you are, and what privileges you hold — using only pre-installed
+OS commands. No tools, no downloads.**
+
+This is the mandatory first step on the initial foothold AND on every machine reached
+via lateral movement (PTH, PTT, WMI, WinRM, etc.). The result decides which path to
+take next.
+
+### 0.1 — Identity & privilege
+
+#### Windows (`cmd` or `psh`)
+
+```
+whoami
+whoami /all
+whoami /groups
+whoami /priv
+```
+
+Parse:
+- Current user and domain prefix (`DOMAIN\user` vs `HOSTNAME\user` vs `NT AUTHORITY\SYSTEM`).
+- Group memberships: `Domain Admins`, `Enterprise Admins`, `Administrators`.
+- Token privileges: `SeImpersonatePrivilege`, `SeDebugPrivilege`, `SeBackupPrivilege` —
+  all are immediate escalation signals (see Phase 2).
+
+#### Linux (`sh`)
+
+```
+id
+```
+
+### 0.2 — Domain membership check
+
+#### Windows — quick domain check (`cmd`)
+
+```
+systeminfo | findstr /B /C:"Domain"
+wmic computersystem get Name,Domain,Workgroup,PartOfDomain /value
+```
+
+Parse `PartOfDomain`:
+- `TRUE` → machine is domain-joined; `Domain` field shows the FQDN. Continue to 0.3.
+- `FALSE` → machine is in a workgroup (`WORKGROUP`). Save `host.domain_joined = false`;
+  skip Phase B; apply workgroup pivot conditions at the bottom of this file.
+
+#### Windows — alternate (PowerShell)
+
+```
+(Get-WmiObject Win32_ComputerSystem).PartOfDomain
+(Get-WmiObject Win32_ComputerSystem).Domain
+[System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+```
+
+`GetCurrentDomain()` throws if not domain-joined — treat exception as `PartOfDomain = false`.
+
+#### Linux (`sh`)
+
+```
+hostname
+cat /etc/hosts
+realm list 2>/dev/null || echo "realm not available"
+```
+
+`realm list` shows the domain name and enrollment status. If realm is absent, check
+`/etc/sssd/sssd.conf` or `/etc/krb5.conf` for domain name.
+
+### 0.3 — DC and domain detail (domain-joined only)
+
+Run **only** if 0.2 confirmed `PartOfDomain = true`.
+
+#### Windows (`cmd`)
+
+```
+echo %USERDOMAIN%
+echo %LOGONSERVER%
+nltest /dsgetdc:%USERDOMAIN%
+net config workstation | findstr /i "domain\|logon"
+```
+
+`%LOGONSERVER%` gives the authenticating DC hostname directly.
+`nltest /dsgetdc` returns the DC FQDN, site, and IP.
+
+#### Windows (PowerShell)
+
+```
+[System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain() | select Name,DomainControllers
+```
+
+#### Linux (`sh`)
+
+```
+cat /etc/krb5.conf 2>/dev/null | grep -E "default_realm|kdc"
+cat /etc/sssd/sssd.conf 2>/dev/null | grep -E "^domains|^ad_domain"
+```
+
+### 0.4 — OS, hostname, and network interfaces
+
+#### Windows (`cmd`)
+
+```
+hostname
+systeminfo | findstr /B /C:"OS Name" /C:"OS Version" /C:"System Type"
+ipconfig /all
+net localgroup administrators
+```
+
+#### Linux (`sh`)
+
+```
+uname -a
+hostname -f
+ip -o -4 addr show
+cat /etc/os-release
+```
+
+### Decision tree after Step 0
+
+```
+PartOfDomain = TRUE
+    └── Same domain as previous machine?
+            YES → skip Step 8 (DC probe already done); proceed to Step 9 (BloodHound)
+            NO  → new domain found → run full Phase A + Phase B from scratch
+                  save new domain to session as additional scope
+
+PartOfDomain = FALSE  (workgroup)
+    └── Any domain hosts visible on network? (check ipconfig /all for DNS suffix)
+            YES → scan for DCs in that domain (Phase A → Step 7 gate)
+            NO  → establish-persistence on this host; wait for scope expansion
+```
+
+Save: `host.domain_joined` (bool), `host.domain_name`, `host.dc_hostname`,
+`host.current_user`, `host.current_user_groups`, `host.token_privileges`.
+
+Emit **one** ability with one stage containing the platform-appropriate commands above.
 
 ---
 
@@ -393,6 +537,7 @@ Save: `ad.spooler_enabled_hosts`.
 
 Signal `success` only when **all** hold:
 
+- `host.domain_joined` populated and `host.current_user` / `host.token_privileges` saved (Step 0).
 - `network.cidr` populated (Step 1).
 - `recon.nmap_available == true` (Step 2, possibly after Step 3).
 - `network.live_hosts` is a non-empty list (Step 4).
@@ -405,6 +550,7 @@ Signal `success` only when **all** hold:
 
 | Step | Technique ID          | Technique name                            | Tactic |
 |------|-----------------------|-------------------------------------------|--------|
+| 0    | T1033 / T1016         | Machine Context Check (identity + domain) | TA0007 |
 | 1    | T1016                 | System Network Configuration Discovery    | TA0007 |
 | 2–3  | T1518                 | Software Discovery / Install              | TA0007 |
 | 4    | T1018                 | Remote System Discovery                   | TA0007 |
@@ -434,6 +580,11 @@ Signal `success` only when **all** hold:
 
 ## Pivot conditions (set `recommended_next`)
 
+- Step 0: `PartOfDomain = FALSE` (workgroup) + domain hosts visible on network → Phase A to find DCs.
+- Step 0: `PartOfDomain = FALSE` + no domain visible → `establishing-persistence` on this host.
+- Step 0: `PartOfDomain = TRUE` + new domain (different from previous machine) → full Phase A + Phase B from scratch for new domain.
+- Step 0: `PartOfDomain = TRUE` + same domain + DC already known → skip to Step 9 (BloodHound).
+- Step 0: `SeImpersonatePrivilege` in token → flag for `escalating-privileges` (Potato attacks) before Phase B.
 - BloodHound collected + DA path found → `moving-laterally` (skip remaining steps).
 - Kerberoastable / AS-REP accounts found → `accessing-credentials` (offline crack first).
 - AD CS ESC vulnerabilities found → `escalating-privileges` (certipy / certify abuse).
