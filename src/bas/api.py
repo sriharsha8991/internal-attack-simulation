@@ -34,8 +34,7 @@ from fastapi.responses import JSONResponse
 from .bootstrap import _bootstrap, _get_compiled_graph, _state
 from .foothold import FootholdResolutionError
 from .persistence import RunStore, now_iso
-from .routes_engagements import router as engagements_router
-from .routes_results import router as results_router
+from .routes import engagements_router, results_router
 
 logger = logging.getLogger(__name__)
 

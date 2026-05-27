@@ -16,8 +16,8 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from .persistence import ResultStore, RunStore
-from .schemas import OperationResultRequest, ResultAcceptedResponse
+from ..persistence import ResultStore, RunStore
+from ..schemas import OperationResultRequest, ResultAcceptedResponse
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ async def receive_results(
     background_tasks: BackgroundTasks,
 ) -> Any:
     # Resolve stores from process-global state.
-    from .bootstrap import _bootstrap, _state
+    from ..bootstrap import _bootstrap, _state
     _bootstrap()
     store: RunStore = _state["store"]
     results_store: ResultStore = _state["results_store"]
@@ -101,7 +101,7 @@ async def receive_results(
 
     # 8. Schedule graph resume in the background (Issue #4 fix) so this
     #    response returns 202 immediately without blocking on LLM calls.
-    from .worker import _resume_graph
+    from ..worker import _resume_graph
     background_tasks.add_task(_resume_graph, engagement_id, payload_dict)
 
     return JSONResponse(
