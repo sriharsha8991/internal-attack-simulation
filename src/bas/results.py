@@ -238,11 +238,20 @@ def build_structural_summary(
             markers: list[str] = []
             for ik in issue_idx.get((ab.ability_id, st.stage_name), []):
                 markers.append(f"⚠ {ik}")
-            has_out = "(has output)" if st.stdout.strip() else ""
             marker_str = " ".join(markers)
             parts = [f"  {i}. {st.stage_name} → exit={st.exit_code}"]
-            if has_out:
-                parts.append(has_out)
+            if st.stdout.strip():
+                # Inline a short preview so the LLM triage step can extract
+                # facts without needing a second read_stage_output round-trip.
+                preview = " | ".join(
+                    ln.strip()
+                    for ln in st.stdout.strip().splitlines()
+                    if ln.strip()
+                )[:400]
+                parts.append(f'stdout: "{preview}"')
+            elif st.stderr.strip():
+                preview = st.stderr.strip()[:200].replace("\n", " ")
+                parts.append(f'stderr: "{preview}"')
             if marker_str:
                 parts.append(marker_str)
             lines.append(" ".join(parts))
