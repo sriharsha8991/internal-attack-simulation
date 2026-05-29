@@ -71,6 +71,15 @@ def _startup() -> None:
     _start_timeout_scanner(cfg.execution.result_wait_timeout)
 
 
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    """Gracefully close the process-global BasClient (httpx connection pool)."""
+    bas = _state.get("bas")
+    if bas is not None:
+        bas.close()
+        logger.info("[shutdown] BasClient closed")
+
+
 def _start_timeout_scanner(timeout_seconds: int) -> None:
     """Periodically resume engagements stuck in awaiting_results past timeout."""
     import time

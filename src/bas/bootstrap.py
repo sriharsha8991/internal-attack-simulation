@@ -42,6 +42,7 @@ _state: dict[str, Any] = {
     "results_store": None,
     "bas": None,             # process-global BasClient (Issue #3 fix)
     "compiled_graph": None,  # singleton compiled graph with checkpointer
+    "llm_provider": None,    # shared LLM provider instance
 }
 _state_lock = threading.Lock()
 
@@ -57,27 +58,35 @@ def _bootstrap() -> tuple[AppConfig, SkillTool, RunStore, ArtifactStore]:
                 or os.environ.get("BAS_RUNS_DIR")
                 or cfg.run.output_dir
             )
-            _state["cfg"] = cfg
-            _state["skills"] = SkillTool("skills").prime()
-            _state["store"] = RunStore(runs_dir)
-            _state["artifacts"] = ArtifactStore(runs_dir)
-            _state["results_store"] = ResultStore(runs_dir)
 
-            # Process-global BasClient (Issue #3 fix) — never closed until
-            # process shutdown so graph resume via webhook uses a live client.
-            _state["bas"] = BasClient(
+            # Build all resources before committing to _state so a partial
+            # failure leaves _state["cfg"] == None, allowing a retry on the
+            # next call instead of silently returning half-initialised state.
+            skills = SkillTool("skills").prime()
+            store = RunStore(runs_dir)
+            artifacts = ArtifactStore(runs_dir)
+            results_store = ResultStore(runs_dir)
+            bas = BasClient(
                 cfg.bas.base_url,
                 sleep_ms=cfg.bas.sleep_ms,
                 timeout=cfg.bas.timeout,
                 dry_run=cfg.bas.dry_run,
             )
 
+            # Commit atomically — all or nothing.
+            _state["skills"] = skills
+            _state["store"] = store
+            _state["artifacts"] = artifacts
+            _state["results_store"] = results_store
+            _state["bas"] = bas
+            _state["cfg"] = cfg  # set LAST — this is the guard variable
+
             logger.info(
                 "[boot] base_url=%s dry_run=%s engagements_dir=%s skills=%d",
                 cfg.bas.base_url,
                 cfg.bas.dry_run,
                 runs_dir,
-                len(_state["skills"].list_summaries()),
+                len(skills.list_summaries()),
             )
         return (
             _state["cfg"],
@@ -92,34 +101,41 @@ def _bootstrap() -> tuple[AppConfig, SkillTool, RunStore, ArtifactStore]:
 # ---------------------------------------------------------------------------
 
 
+def _get_provider(cfg: AppConfig):
+    """Return the shared LLM provider instance (cached in _state)."""
+    if _state.get("llm_provider") is None:
+        _state["llm_provider"] = get_provider(cfg.llm)
+    return _state["llm_provider"]
+
+
 def _build_master(cfg: AppConfig, *, dry_run: bool) -> MasterPolicy:
     """Master router (campaign director). Falls back to StaticMasterRouter when
     no LLM key is configured (dry-run only)."""
     if dry_run:
         try:
-            return LLMMasterRouter(get_provider(cfg.llm))
+            return LLMMasterRouter(_get_provider(cfg))
         except Exception:
             return StaticMasterRouter()
-    return LLMMasterRouter(get_provider(cfg.llm))
+    return LLMMasterRouter(_get_provider(cfg))
 
 
 def _build_evaluator(cfg: AppConfig, *, dry_run: bool):
     if dry_run:
         try:
-            return LLMEvaluator(get_provider(cfg.llm))
+            return LLMEvaluator(_get_provider(cfg))
         except Exception:
             return StaticAcceptEvaluator()
-    return LLMEvaluator(get_provider(cfg.llm))
+    return LLMEvaluator(_get_provider(cfg))
 
 
 def _build_planner(cfg: AppConfig, *, dry_run: bool) -> Planner:
     if dry_run:
         try:
-            return LLMPlanner(get_provider(cfg.llm))
+            return LLMPlanner(_get_provider(cfg))
         except Exception:
             from .worker import _DryRunStubPlanner
             return _DryRunStubPlanner()
-    return LLMPlanner(get_provider(cfg.llm))
+    return LLMPlanner(_get_provider(cfg))
 
 
 def _build_checkpointer(cfg: AppConfig) -> Any:

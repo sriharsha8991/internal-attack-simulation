@@ -4,7 +4,7 @@ Public surface:
 
     from bas.orchestrator import (
         SessionState, StageResult, DONE_SENTINEL,
-        build_graph, run_orchestrator,
+        build_graph,
     )
 
 The graph is driven by a ``MasterPolicy`` (campaign director) defined in
@@ -12,7 +12,7 @@ The graph is driven by a ``MasterPolicy`` (campaign director) defined in
 commit, and updates session memory after each phase.
 """
 
-from .graph import build_graph, run_orchestrator
+from .graph import build_graph
 from .state import DONE_SENTINEL, PhaseRecord, SessionState, StageResult
 
 __all__ = [
@@ -21,5 +21,4 @@ __all__ = [
     "PhaseRecord",
     "DONE_SENTINEL",
     "build_graph",
-    "run_orchestrator",
 ]

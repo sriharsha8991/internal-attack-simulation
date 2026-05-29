@@ -55,35 +55,16 @@ def _release_engagement_lock(engagement_id: str) -> None:
 
 
 def _notify_completion(engagement_id: str, status: str) -> None:
-    """Send a terminal ``POST /ai/operation-feedback`` with ``loop_status='done'``.
+    """Notify the backend that the engagement is finished.
 
-    This lets the backend know the orchestrator is finished and will not push
-    any more abilities or feedback for this engagement.
+    Uses FeedbackApi.finalize() — the proper abstraction for terminal
+    notifications. Best-effort: failures are logged but don't crash the worker.
     """
     try:
         bas = _state.get("bas")
-        if bas is None or bas.feedback._dry:
+        if bas is None:
             return
-
-        from .client.feedback import AIFeedbackPayload
-
-        payload = AIFeedbackPayload(
-            source="operation-analyzer",
-            loop_status="finalize",
-            changes=[],
-            engagement_id=engagement_id,
-            engagement_status=status,
-        )
-
-        bas.feedback._t.post_json(
-            "/ai/operation-feedback",
-            json=payload.model_dump(mode="json"),
-        )
-        logger.info(
-            "[completion] notified backend: engagement=%s status=%s",
-            engagement_id,
-            status,
-        )
+        bas.feedback.finalize(engagement_id, status)
     except Exception as exc:  # noqa: BLE001
         # Best-effort — don't let notification failure crash the worker.
         logger.warning(

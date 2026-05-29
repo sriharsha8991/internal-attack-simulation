@@ -1449,7 +1449,7 @@ def build_graph(
 def _stream_graph(app, seed: dict[str, Any], run_config: dict[str, Any]) -> dict[str, Any]:
     """Stream graph updates, log each step, raise GraphInterrupt if paused.
 
-    Shared between ``run_orchestrator`` (initial run) and ``_resume_graph``
+    Shared between ``_run_engagement_inner`` (initial run) and ``_resume_graph``
     (webhook resume) so both use the same logging/interrupt logic.
     """
     logger.info(
@@ -1496,55 +1496,7 @@ def _stream_graph(app, seed: dict[str, Any], run_config: dict[str, Any]) -> dict
     return state
 
 
-def run_orchestrator(
-    *,
-    master: MasterPolicy | None = None,
-    skill_tool: SkillTool,
-    planner: Planner,
-    bas: BasClient,
-    available_phases: list[str] | None = None,
-    foothold: dict[str, Any] | None = None,
-    max_iterations: int = 20,
-    initial_state: SessionState | None = None,
-    artifacts: ArtifactStore | None = None,
-    evaluator: EvaluatorPolicy | None = None,
-    max_master_revisions: int = 1,
-    max_planner_attempts: int = 3,
-    max_planner_tool_calls: int = 20,
-    checkpointer: Any = None,
-) -> SessionState:
-    """Convenience runner. Returns the terminal `SessionState`.
-
-    Uses ``app.stream(stream_mode="updates")`` instead of ``app.invoke`` so
-    every graph step is logged as it completes — giving a clean real-time trace
-    of node name + updated state keys without any extra overhead.
-    Each node's internal ``_log_step`` calls provide the detail; this outer
-    loop adds a structural "node completed" line.
-    """
-    master = master or StaticMasterRouter()
-    app = build_graph(
-        master=master,
-        skill_tool=skill_tool,
-        planner=planner,
-        bas=bas,
-        artifacts=artifacts,
-        evaluator=evaluator,
-        checkpointer=checkpointer,
-    )
-    seed: SessionState = {
-        "foothold": foothold or {},
-        "available_phases": list(available_phases or []),
-        "max_iterations": max_iterations,
-        "max_master_revisions": max_master_revisions,
-        "max_planner_attempts": max_planner_attempts,
-        "max_planner_tool_calls": max_planner_tool_calls,
-    }
-    if initial_state:
-        seed.update(initial_state)
-
-    # Thread ID for checkpointer — defaults to run_id so each engagement
-    # gets its own checkpoint timeline.
-    thread_id = seed.get("run_id") or "default"
-    run_config = {"configurable": {"thread_id": thread_id}}
-
-    return _stream_graph(app, seed, run_config)  # type: ignore[return-value]
+# NOTE: run_orchestrator() was removed — it created a private build_graph()
+# with its own checkpointer, causing split-brain on interrupt/resume.
+# All callers must use _get_compiled_graph() (the process singleton) and
+# _stream_graph() directly. See bootstrap._get_compiled_graph().

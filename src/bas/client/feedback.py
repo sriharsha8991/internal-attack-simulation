@@ -54,6 +54,13 @@ class FeedbackApi:
         self._t = transport
         self._dry = dry_run
 
+    def _post_feedback(self, payload: AIFeedbackPayload) -> None:
+        """POST the feedback payload to the backend. Shared by send() and finalize()."""
+        self._t.post_json(
+            "/ai/operation-feedback",
+            json=payload.model_dump(mode="json"),
+        )
+
     def send(
         self,
         operation_id: str,
@@ -84,12 +91,41 @@ class FeedbackApi:
             )
             return
 
-        self._t.post_json(
-            "/ai/operation-feedback",
-            json=payload.model_dump(mode="json"),
-        )
+        self._post_feedback(payload)
         logger.info(
             "[feedback] sent %d stage corrections for op=%s",
             len(changes),
             operation_id,
+        )
+
+    def finalize(
+        self,
+        engagement_id: str,
+        engagement_status: str,
+    ) -> None:
+        """Notify the backend that the engagement is complete.
+
+        Sends a terminal feedback with ``loop_status='finalize'`` and no
+        changes. Does nothing in dry-run mode.
+        """
+        if self._dry:
+            logger.info(
+                "[feedback] DRY-RUN: would finalize engagement=%s status=%s",
+                engagement_id,
+                engagement_status,
+            )
+            return
+
+        payload = AIFeedbackPayload(
+            source="operation-analyzer",
+            loop_status="finalize",
+            changes=[],
+            engagement_id=engagement_id,
+            engagement_status=engagement_status,
+        )
+        self._post_feedback(payload)
+        logger.info(
+            "[feedback] finalized engagement=%s status=%s",
+            engagement_id,
+            engagement_status,
         )

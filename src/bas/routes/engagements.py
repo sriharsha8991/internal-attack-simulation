@@ -14,8 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
-from ..bootstrap import _bootstrap
-from ..client import BasClient
+from ..bootstrap import _bootstrap, _state
 from ..persistence import make_record, now_iso
 from ..phases import build_phase_index, known_phases, resolve_phases_to_skills
 from ..schemas import (
@@ -102,12 +101,9 @@ def list_skills() -> list[SkillInfo]:
 
 @router.get("/environments")
 def list_environments() -> list[dict[str, Any]]:
-    cfg, _, _, _ = _bootstrap()
-    bas = BasClient.from_config(cfg.bas)
-    try:
-        return [env.model_dump(mode="json") for env in bas.environments.list()]
-    finally:
-        bas.close()
+    _bootstrap()
+    bas = _state["bas"]
+    return [env.model_dump(mode="json") for env in bas.environments.list()]
 
 
 # ---------------------------------------------------------------------------
