@@ -54,8 +54,10 @@ async def receive_results(
     store: RunStore = _state["store"]
     results_store: ResultStore = _state["results_store"]
 
-    # 1. Extract engagement_id from body
-    engagement_id = payload.engagement_id
+    # 1. Extract engagement_id from body and normalise format.
+    #    Our store keys are 32-char hex (no dashes). The backend may send
+    #    the dashed UUID form (e.g. "b3b3bdc6-1926-42f9-8311-55ce1107bd33").
+    engagement_id = payload.engagement_id.replace("-", "")
 
     # 2. Engagement must exist
     record = store.get(engagement_id)
@@ -65,42 +67,52 @@ async def receive_results(
             f"engagement {engagement_id!r} not found",
         )
 
-    # 3. Engagement must be waiting for results
+    # 3. Engagement must be in a state that can accept results.
+    #    If already completed/failed (e.g. timeout scanner expired it),
+    #    we still persist the result for audit but skip the graph resume.
     eng_status = record.get("status")
-    if eng_status not in ("awaiting_results", "running"):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"engagement status is {eng_status!r}; expected 'awaiting_results'",
-        )
+    _expired = eng_status not in ("awaiting_results", "running")
 
-    # 4. Validate operation_id format
-    operation_id = payload.operation_id
+    # 4. Validate operation_id format (nested inside operation object)
+    operation_id = payload.operation.operation_id
     try:
         uuid.UUID(str(operation_id))
     except ValueError:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"'operation_id' is not a valid UUID: {operation_id!r}",
+            f"'operation.operation_id' is not a valid UUID: {operation_id!r}",
         )
     operation_id = str(operation_id)
 
-    # 5. Serialize payload to dict for storage
+    # 5. Serialize payload to dict for storage (preserves full backend snapshot)
     payload_dict = payload.model_dump(mode="json")
 
     # 6. Idempotency — already received this operation's result
     if results_store.exists(engagement_id, operation_id):
         return {"status": "already_received", "operation_id": operation_id}
 
-    # 7. Save to disk
+    # 7. Save to disk (always persisted for audit, even if expired)
     results_store.save(engagement_id, operation_id, payload_dict)
     logger.info(
-        "[results] saved result for engagement=%s operation=%s",
+        "[results] saved result for engagement=%s operation=%s (expired=%s)",
         engagement_id,
         operation_id,
+        _expired,
     )
 
-    # 8. Schedule graph resume in the background (Issue #4 fix) so this
-    #    response returns 202 immediately without blocking on LLM calls.
+    # 8. Resume graph only if engagement is still active.
+    if _expired:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "status": "accepted_late",
+                "operation_id": operation_id,
+                "detail": f"engagement already {eng_status!r}; result stored but graph not resumed",
+            },
+        )
+
+    # Schedule graph resume in the background so this response returns 202
+    # immediately without blocking on LLM calls.
     from ..worker import _resume_graph
     background_tasks.add_task(_resume_graph, engagement_id, payload_dict)
 

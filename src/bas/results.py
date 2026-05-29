@@ -127,8 +127,78 @@ _CROSS_VAR_RE = re.compile(
 
 
 def parse_operation_result(raw: dict[str, Any]) -> OperationResult:
-    """Validate and parse raw backend JSON into a typed model."""
-    return OperationResult.model_validate(raw)
+    """Validate and parse raw backend JSON into a typed model.
+
+    The backend sends a rich snapshot with:
+    - ``operation``: nested metadata (operation_id, status, completed_at, ...)
+    - ``abilities``: stage definitions (stage_id, command_template, ...)
+    - ``execution_logs``: actual output (stdout, stderr, exit_code, ...)
+
+    This function merges execution_logs into abilities by matching
+    (ability_id, stage_id) so downstream code sees a single unified model
+    with stdout/stderr on each stage.
+    """
+    # Handle the nested operation structure from the backend.
+    op_info = raw.get("operation") or {}
+    operation_id = op_info.get("operation_id") or raw.get("operation_id", "")
+    operation_name = op_info.get("name") or raw.get("operation_name", "")
+    operation_status = op_info.get("status") or raw.get("operation_status", "completed")
+    completed_at = op_info.get("completed_at") or raw.get("completed_at")
+
+    # Build execution_logs index: (ability_id, stage_id) -> log entry
+    exec_logs = raw.get("execution_logs") or []
+    log_index: dict[tuple[str, str], dict[str, Any]] = {}
+    for log in exec_logs:
+        ab_id = str(log.get("ability_id") or "")
+        st_id = str(log.get("stage_id") or "")
+        if ab_id and st_id:
+            log_index[(ab_id, st_id)] = log
+
+    # Merge abilities + execution_logs into AbilityResult entries.
+    abilities: list[AbilityResult] = []
+    for ab_raw in raw.get("abilities") or []:
+        ab_id = str(ab_raw.get("ability_id") or "")
+        stages: list[StageExecution] = []
+
+        for stg_raw in ab_raw.get("stages") or []:
+            st_id = str(stg_raw.get("stage_id") or "")
+            log_entry = log_index.get((ab_id, st_id), {})
+
+            # Merge: stage definition provides structure; execution_log
+            # provides actual output.
+            exit_code = log_entry.get("exit_code", -1)
+            stages.append(StageExecution(
+                stage_name=stg_raw.get("stage_name") or st_id,
+                executor=log_entry.get("executor") or stg_raw.get("executor") or "",
+                command_executed=log_entry.get("command_executed") or stg_raw.get("command_template") or "",
+                execution_status="passed" if exit_code == 0 else "failed",
+                stdout=log_entry.get("stdout") or "",
+                stderr=log_entry.get("stderr") or "",
+                exit_code=exit_code,
+                timestamp=log_entry.get("timestamp"),
+            ))
+
+        abilities.append(AbilityResult(
+            ability_id=ab_id,
+            name=ab_raw.get("name") or "",
+            mitre_technique_id=ab_raw.get("mitre_technique_id"),
+            platform=ab_raw.get("platform") or "",
+            stages=stages,
+        ))
+
+    # Normalise operation_status to allowed literals
+    if operation_status not in ("completed", "failed", "partial"):
+        operation_status = "completed"
+
+    return OperationResult(
+        operation_id=str(operation_id),
+        operation_name=str(operation_name),
+        operation_status=operation_status,
+        completed_at=completed_at,
+        adversary=raw.get("adversary") or {},
+        progress=raw.get("progress") or {},
+        abilities=abilities,
+    )
 
 
 def detect_issues(

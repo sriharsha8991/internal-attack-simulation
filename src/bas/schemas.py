@@ -132,18 +132,54 @@ class SkillInfo(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class StageExecutionRequest(BaseModel):
-    """One executed stage within an ability."""
+class StageDefinition(BaseModel):
+    """Stage definition as stored in the backend (no execution output)."""
 
-    stage_name: str = Field(..., description="Stage identifier.")
-    executor: str = Field(default="", description="Executor used: cmd, psh, sh, bash.")
-    command_executed: str = Field(default="", description="The actual command that was run.")
-    execution_status: Literal["passed", "failed"] = Field(
-        default="failed", description="Whether the stage passed or failed."
+    stage_id: str = Field(..., description="Stage UUID.")
+    stage_name: str = Field(default="", description="Stage identifier.")
+    stage_order: int = Field(default=0, description="Execution order within the ability.")
+    executor: str | None = Field(default=None, description="Executor: cmd, psh, sh, bash.")
+    command_template: str | None = Field(default=None, description="Command template for execution.")
+    timeout_seconds: int | None = Field(default=None, description="Execution timeout.")
+    payload: dict[str, Any] | None = Field(default=None, description="Optional payload metadata.")
+
+    model_config = {"extra": "allow"}
+
+
+class AbilityDefinition(BaseModel):
+    """Ability definition with stage definitions (no execution output)."""
+
+    ability_id: str = Field(..., description="The ability UUID.")
+    name: str = Field(default="", description="Ability name.")
+    description: str | None = Field(default=None, description="Ability description.")
+    mitre_tactic: str | None = Field(default=None, description="MITRE ATT&CK tactic.")
+    mitre_technique_id: str | None = Field(
+        default=None, description="MITRE ATT&CK technique ID, e.g. T1016."
     )
+    platform: str = Field(default="", description="Target platform: windows, linux, mac.")
+    impact_type: str | None = Field(default=None)
+    default_severity: str | None = Field(default=None)
+    engagement_id: str | None = Field(default=None)
+    requires_approval: bool | None = Field(default=None)
+    tags: list[str] | None = Field(default=None)
+    created_by: str | None = Field(default=None)
+    stages: list[StageDefinition] = Field(
+        default_factory=list, description="Ordered stage definitions."
+    )
+
+    model_config = {"extra": "allow"}
+
+
+class ExecutionLogEntry(BaseModel):
+    """A single execution log entry from the backend — the actual output."""
+
+    ability_id: str | None = Field(default=None, description="Ability UUID.")
+    stage_id: str | None = Field(default=None, description="Stage UUID.")
+    command_executed: str = Field(default="", description="The actual command that was run.")
     stdout: str = Field(default="", description="Full standard output captured.")
     stderr: str = Field(default="", description="Full standard error captured.")
     exit_code: int = Field(default=-1, description="Exit code. 0 = success.")
+    executor: str = Field(default="", description="Executor used: cmd, psh, sh, bash.")
     timestamp: datetime | None = Field(
         default=None, description="When this stage executed (ISO 8601)."
     )
@@ -151,57 +187,70 @@ class StageExecutionRequest(BaseModel):
     model_config = {"extra": "allow"}
 
 
-class AbilityResultRequest(BaseModel):
-    """Execution outcome for a single ability (all its stages)."""
+class OperationInfo(BaseModel):
+    """Nested operation metadata from the backend payload."""
 
-    ability_id: str = Field(
-        ..., description="The ability UUID that was pushed to the BAS backend."
-    )
-    name: str = Field(default="", description="Ability name.")
-    mitre_technique_id: str | None = Field(
-        default=None, description="MITRE ATT&CK technique ID, e.g. T1016."
-    )
-    platform: str = Field(default="", description="Target platform: windows, linux, mac.")
-    stages: list[StageExecutionRequest] = Field(
-        default_factory=list, description="List of stage execution results."
-    )
+    operation_id: str = Field(..., description="Operation UUID.")
+    engagement_id: str | None = Field(default=None)
+    name: str = Field(default="", description="Operation name.")
+    status: str = Field(default="completed", description="Operation status.")
+    started_at: datetime | None = Field(default=None)
+    completed_at: datetime | None = Field(default=None)
+    kill_switch_triggered: bool | None = Field(default=None)
+    execution_mode: str | None = Field(default=None)
 
     model_config = {"extra": "allow"}
 
 
 class OperationResultRequest(BaseModel):
-    """Top-level result payload POSTed by the BAS backend after execution."""
+    """Top-level result payload POSTed by the BAS backend after execution.
 
+    The backend sends a full operation snapshot with:
+    - ``operation``: nested operation metadata (contains operation_id, status, etc.)
+    - ``engagement_id``: top-level engagement identifier
+    - ``abilities``: stage definitions (command_template, stage_order, etc.)
+    - ``execution_logs``: actual execution output (stdout, stderr, exit_code)
+    """
+
+    operation: OperationInfo = Field(
+        ..., description="Nested operation metadata."
+    )
     engagement_id: str = Field(
         ...,
-        description="The engagement this result belongs to (returned by POST /engagements).",
+        description="The engagement this result belongs to.",
         examples=["08c047ac0cba49b3ae85257406a5cc28"],
     )
-    operation_id: str = Field(
-        ...,
-        description="Unique UUID for this execution run.",
-        examples=["f9e8d7c6-b5a4-3210-fedc-ba0987654321"],
-    )
-    operation_name: str = Field(default="", description="Human-readable operation label.")
-    operation_status: Literal["completed", "failed", "partial"] = Field(
-        default="completed", description="Overall operation outcome."
-    )
-    completed_at: datetime | None = Field(
-        default=None, description="When execution finished (ISO 8601)."
+    environment: dict[str, Any] = Field(
+        default_factory=dict, description="Environment metadata."
     )
     adversary: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Adversary metadata: {adversary_id, name}.",
+        default_factory=dict, description="Adversary metadata.",
+    )
+    platform_agents: dict[str, Any] = Field(
+        default_factory=dict, description="Platform agent references.",
     )
     progress: dict[str, Any] = Field(
         default_factory=dict,
         description="Execution progress: {total_abilities, completed_abilities, progress_percent}.",
     )
-    abilities: list[AbilityResultRequest] = Field(
-        default_factory=list, description="List of ability execution results."
+    abilities: list[AbilityDefinition] = Field(
+        default_factory=list, description="Ability definitions with stages."
+    )
+    execution_logs: list[ExecutionLogEntry] = Field(
+        default_factory=list,
+        description="Execution output: stdout, stderr, exit_code per stage.",
     )
 
     model_config = {"extra": "allow"}
+
+    # Convenience accessors so downstream code can use flat names.
+    @property
+    def operation_id(self) -> str:
+        return self.operation.operation_id
+
+    @property
+    def operation_status(self) -> str:
+        return self.operation.status
 
 
 class ResultAcceptedResponse(BaseModel):

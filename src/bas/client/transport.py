@@ -52,7 +52,18 @@ class HttpTransport:
     # ---- request primitives -------------------------------------------------
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        resp = self._http.request(method, path, **kwargs)
+        try:
+            resp = self._http.request(method, path, **kwargs)
+        except httpx.ConnectError as exc:
+            raise BasClientError(
+                method, path, 0,
+                f"connection failed (cannot reach {self.base_url}): {exc}",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise BasClientError(
+                method, path, 0,
+                f"request timed out ({self.base_url}): {exc}",
+            ) from exc
         if resp.status_code >= 400:
             raise BasClientError(method, path, resp.status_code, resp.text)
         return resp

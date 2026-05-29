@@ -92,6 +92,8 @@ def _expire_stale_engagements(timeout_seconds: int) -> None:
     """Resume graphs that have been waiting longer than the configured timeout."""
     from langgraph.types import Command
 
+    from .worker import _get_engagement_lock
+
     store: RunStore = _state["store"]
     compiled = _get_compiled_graph()
     now = datetime.now(timezone.utc)
@@ -112,33 +114,50 @@ def _expire_stale_engagements(timeout_seconds: int) -> None:
             engagement_id,
             int(elapsed),
         )
+
+        # Acquire per-engagement lock to prevent racing with _resume_graph.
+        lock = _get_engagement_lock(engagement_id)
+        if not lock.acquire(timeout=10):
+            logger.info(
+                "[timeout-scanner] engagement %s locked by resume; skipping this cycle",
+                engagement_id,
+            )
+            continue
+
         try:
+            # Re-read under lock — a webhook resume may have already changed status.
+            fresh = store.get(engagement_id)
+            if not fresh or fresh.get("status") != "awaiting_results":
+                continue
+
             from langgraph.errors import GraphInterrupt
 
-            record["status"] = "running"
-            record.pop("awaiting_since", None)
-            store.save(record)
+            fresh["status"] = "running"
+            fresh.pop("awaiting_since", None)
+            store.save(fresh)
 
             compiled.invoke(
                 Command(resume={"timeout": True, "engagement_id": engagement_id}),
                 config={"configurable": {"thread_id": engagement_id}},
             )
-            record["status"] = "completed"
-            record["finished_at"] = now_iso()
-            store.save(record)
+            fresh["status"] = "completed"
+            fresh["finished_at"] = now_iso()
+            store.save(fresh)
         except GraphInterrupt:
-            record["status"] = "awaiting_results"
-            record["awaiting_since"] = now_iso()
-            store.save(record)
+            fresh["status"] = "awaiting_results"
+            fresh["awaiting_since"] = now_iso()
+            store.save(fresh)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "[timeout-scanner] failed to resume engagement %s",
                 engagement_id,
             )
-            record["status"] = "failed"
-            record["error"] = "timeout-scanner resume failed"
-            record["finished_at"] = now_iso()
-            store.save(record)
+            fresh["status"] = "failed"
+            fresh["error"] = "timeout-scanner resume failed"
+            fresh["finished_at"] = now_iso()
+            store.save(fresh)
+        finally:
+            lock.release()
 
 
 # ---------------------------------------------------------------------------

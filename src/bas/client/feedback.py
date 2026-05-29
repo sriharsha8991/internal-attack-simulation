@@ -38,6 +38,8 @@ class AIFeedbackPayload(BaseModel):
     source: str = "operation-analyzer"
     loop_status: str = "continue"
     changes: list[AIStageChange] = Field(default_factory=list)
+    engagement_id: str | None = None
+    engagement_status: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ class FeedbackApi:
         changes: list[AIStageChange],
         *,
         loop_status: str = "continue",
+        engagement_id: str | None = None,
     ) -> None:
         """POST /ai/operation-feedback with the given stage changes.
 
@@ -70,6 +73,7 @@ class FeedbackApi:
         payload = AIFeedbackPayload(
             loop_status=loop_status,
             changes=changes,
+            engagement_id=engagement_id,
         )
 
         if self._dry:

@@ -7,26 +7,46 @@ All shared state access goes through ``bootstrap``.
 from __future__ import annotations
 
 import logging
+import threading
 import traceback
 from typing import Any
 
 from .bootstrap import (
     _bootstrap,
-    _build_checkpointer,
-    _build_evaluator,
-    _build_master,
-    _build_planner,
     _get_compiled_graph,
     _state,
 )
-from .config import AppConfig
 from .foothold import resolve_foothold
-from .orchestrator import run_orchestrator
 from .persistence import RunStore, now_iso
 from .phases import known_phases, resolve_phases_to_skills
 from .schemas import EngagementCreateRequest
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Per-engagement lock to prevent concurrent graph invocations on the same
+# thread_id (timeout scanner vs. webhook resume, or multiple results arriving
+# simultaneously).
+# ---------------------------------------------------------------------------
+
+_engagement_locks: dict[str, threading.Lock] = {}
+_engagement_locks_guard = threading.Lock()
+
+
+def _get_engagement_lock(engagement_id: str) -> threading.Lock:
+    """Return (or create) a lock specific to this engagement."""
+    with _engagement_locks_guard:
+        lock = _engagement_locks.get(engagement_id)
+        if lock is None:
+            lock = threading.Lock()
+            _engagement_locks[engagement_id] = lock
+        return lock
+
+
+def _release_engagement_lock(engagement_id: str) -> None:
+    """Remove the lock entry when an engagement finishes (cleanup)."""
+    with _engagement_locks_guard:
+        _engagement_locks.pop(engagement_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -49,16 +69,15 @@ def _notify_completion(engagement_id: str, status: str) -> None:
 
         payload = AIFeedbackPayload(
             source="operation-analyzer",
-            loop_status="done",
+            loop_status="finalize",
             changes=[],
+            engagement_id=engagement_id,
+            engagement_status=status,
         )
-        payload_dict = payload.model_dump(mode="json")
-        payload_dict["engagement_id"] = engagement_id
-        payload_dict["engagement_status"] = status
 
         bas.feedback._t.post_json(
             "/ai/operation-feedback",
-            json=payload_dict,
+            json=payload.model_dump(mode="json"),
         )
         logger.info(
             "[completion] notified backend: engagement=%s status=%s",
@@ -171,6 +190,16 @@ def _serialise_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _run_engagement(engagement_id: str) -> None:
     """Execute an engagement end-to-end in a background thread."""
+    lock = _get_engagement_lock(engagement_id)
+    lock.acquire()
+    try:
+        _run_engagement_inner(engagement_id)
+    finally:
+        lock.release()
+        _release_engagement_lock(engagement_id)
+
+
+def _run_engagement_inner(engagement_id: str) -> None:
     cfg, skill_tool, store, artifacts = _bootstrap()
     record = store.get(engagement_id)
     if record is None:
@@ -223,25 +252,24 @@ def _run_engagement(engagement_id: str) -> None:
         record["foothold"] = foothold
         store.save(record)  # checkpoint so caller can poll mid-flight
 
-        # 3. Build checkpointer, run the graph
-        checkpointer = _build_checkpointer(cfg)
+        # 3. Run the graph using the process-global singleton (shared
+        #    checkpointer ensures resume uses the same state).
+        compiled = _get_compiled_graph()
 
-        state = run_orchestrator(
-            master=_build_master(cfg, dry_run=dry_run),
-            skill_tool=skill_tool,
-            planner=_build_planner(cfg, dry_run=dry_run),
-            bas=bas,
-            foothold=foothold,
-            available_phases=requested_phases,
-            max_iterations=request.max_iterations,
-            initial_state={
-                "run_id": engagement_id,
-                "results_dir": str(artifacts.root / engagement_id / "results"),
-            },
-            artifacts=artifacts,
-            evaluator=_build_evaluator(cfg, dry_run=dry_run),
-            checkpointer=checkpointer,
-        )
+        seed = {
+            "foothold": foothold,
+            "available_phases": requested_phases,
+            "max_iterations": request.max_iterations,
+            "max_master_revisions": 1,
+            "max_planner_attempts": 3,
+            "max_planner_tool_calls": 20,
+            "run_id": engagement_id,
+            "results_dir": str(artifacts.root / engagement_id / "results"),
+        }
+        run_config = {"configurable": {"thread_id": engagement_id}}
+
+        from .orchestrator.graph import _stream_graph
+        state = _stream_graph(compiled, seed, run_config)
 
         record["state"] = _serialise_state(state)
         record["artifacts_dir"] = str(artifacts.root / engagement_id)
@@ -282,21 +310,42 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
 
     Design note (Issue #4 fix): runs in a BackgroundTask so the webhook
     returns 202 immediately — the BAS backend caller is not blocked.
+
+    Uses a per-engagement lock to prevent concurrent resumes (e.g. multiple
+    results arriving simultaneously, or timeout scanner racing with a webhook).
     """
     from langgraph.errors import GraphInterrupt
     from langgraph.types import Command
 
-    store: RunStore = _state["store"]
-    record = store.get(engagement_id)
-    if not record:
-        logger.warning("[resume] engagement %s not found; skipping", engagement_id)
+    lock = _get_engagement_lock(engagement_id)
+    if not lock.acquire(timeout=120):
+        logger.warning(
+            "[resume] engagement %s lock timeout — another resume in progress; skipping",
+            engagement_id,
+        )
         return
 
-    record["status"] = "running"
-    record.pop("awaiting_since", None)
-    store.save(record)
-
     try:
+        store: RunStore = _state["store"]
+        record = store.get(engagement_id)
+        if not record:
+            logger.warning("[resume] engagement %s not found; skipping", engagement_id)
+            return
+
+        # Re-check status under the lock — may have been completed/failed
+        # by the timeout scanner or a prior resume while we waited.
+        if record.get("status") not in ("awaiting_results", "running"):
+            logger.info(
+                "[resume] engagement %s status is %r — skipping resume",
+                engagement_id,
+                record.get("status"),
+            )
+            return
+
+        record["status"] = "running"
+        record.pop("awaiting_since", None)
+        store.save(record)
+
         compiled = _get_compiled_graph()
         run_config = {"configurable": {"thread_id": engagement_id}}
         compiled.invoke(Command(resume=result_payload), config=run_config)
@@ -319,3 +368,5 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
         store.save(record)
         logger.exception("[resume] engagement %s failed", engagement_id)
         _notify_completion(engagement_id, "failed")
+    finally:
+        lock.release()

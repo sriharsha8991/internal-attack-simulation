@@ -34,6 +34,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
@@ -929,7 +930,11 @@ def _make_push_node(
                 operation_id=op_id,
             )
             if changes:
-                bas.feedback.send(operation_id=op_id, changes=changes)
+                bas.feedback.send(
+                    operation_id=op_id,
+                    changes=changes,
+                    engagement_id=state.get("run_id"),
+                )
                 log.append(
                     f"[push] RETRY phase={phase} sent {len(changes)} "
                     f"feedback corrections for op={op_id}"
@@ -1441,6 +1446,56 @@ def build_graph(
     return g.compile(checkpointer=checkpointer)
 
 
+def _stream_graph(app, seed: dict[str, Any], run_config: dict[str, Any]) -> dict[str, Any]:
+    """Stream graph updates, log each step, raise GraphInterrupt if paused.
+
+    Shared between ``run_orchestrator`` (initial run) and ``_resume_graph``
+    (webhook resume) so both use the same logging/interrupt logic.
+    """
+    logger.info(
+        "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
+        seed.get("available_phases"),
+        list((seed.get("foothold") or {}).keys()),
+        run_config.get("configurable", {}).get("thread_id"),
+    )
+
+    state: dict[str, Any] = dict(seed)
+    step_count = 0
+    _interrupted = False
+    for chunk in app.stream(seed, config=run_config, stream_mode="updates"):
+        for node_name, node_updates in chunk.items():
+            if not isinstance(node_updates, dict):
+                if node_name == "__interrupt__":
+                    _interrupted = True
+                continue
+            step_count += 1
+            phase = node_updates.get("current_phase") or state.get("current_phase") or ""
+            visible_keys = [
+                k for k in node_updates
+                if k not in ("log", "proposal_log", "stage_results")
+            ]
+            logger.info(
+                "[GRAPH][%-16s]  step=%-3d  phase=%-18s  keys=[%s]",
+                node_name.upper(),
+                step_count,
+                f"{phase!r}" if phase else "(none)",
+                ", ".join(visible_keys),
+            )
+            state.update(node_updates)
+    if _interrupted:
+        raise GraphInterrupt(())
+
+    completed = state.get("completed_phases") or []
+    history = state.get("phase_history") or []
+    logger.info(
+        "[GRAPH][DONE           ]  steps=%d  completed_phases=%s  phase_records=%d",
+        step_count,
+        completed,
+        len(history),
+    )
+    return state
+
+
 def run_orchestrator(
     *,
     master: MasterPolicy | None = None,
@@ -1492,44 +1547,4 @@ def run_orchestrator(
     thread_id = seed.get("run_id") or "default"
     run_config = {"configurable": {"thread_id": thread_id}}
 
-    logger.info(
-        "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
-        seed.get("available_phases"),
-        list((seed.get("foothold") or {}).keys()),
-        thread_id,
-    )
-
-    # Stream updates to get per-step visibility; merge into full state so the
-    # caller receives the same complete dict that invoke() would return.
-    # Each node returns FULL lists (not diffs), so plain dict.update is correct.
-    state: dict[str, Any] = dict(seed)
-    step_count = 0
-    for chunk in app.stream(seed, config=run_config, stream_mode="updates"):
-        for node_name, node_updates in chunk.items():
-            step_count += 1
-            phase = node_updates.get("current_phase") or state.get("current_phase") or ""
-            # Log all updated keys except verbose list fields that nodes already
-            # logged internally (log, proposal_log stay in the audit trail but
-            # are noisy at the stream level).
-            visible_keys = [
-                k for k in node_updates
-                if k not in ("log", "proposal_log", "stage_results")
-            ]
-            logger.info(
-                "[GRAPH][%-16s]  step=%-3d  phase=%-18s  keys=[%s]",
-                node_name.upper(),
-                step_count,
-                f"{phase!r}" if phase else "(none)",
-                ", ".join(visible_keys),
-            )
-            state.update(node_updates)
-
-    completed = state.get("completed_phases") or []
-    history = state.get("phase_history") or []
-    logger.info(
-        "[GRAPH][DONE           ]  steps=%d  completed_phases=%s  phase_records=%d",
-        step_count,
-        completed,
-        len(history),
-    )
-    return state  # type: ignore[return-value]
+    return _stream_graph(app, seed, run_config)  # type: ignore[return-value]
