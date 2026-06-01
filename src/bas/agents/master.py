@@ -167,9 +167,11 @@ _MASTER_PLAN_PROMPT = (
     "  * When writing constraints, include relevant data from phase_history\n"
     "    (e.g. discovered CIDRs, live hosts, creds obtained) so the planner\n"
     "    can reference them directly in commands.\n"
-    "\n"
-    "RETRY CONTEXT\n"
-    "  If `execution_summary` is provided, you are re-planning after actual\n"
+)
+
+_MASTER_PLAN_RETRY_CONTEXT = (
+    "\nRETRY CONTEXT\n"
+    "  `execution_summary` is provided — you are re-planning after actual\n"
     "  execution results. Analyse the summary:\n"
     "    * If critical objectives were NOT met but the cause is fixable\n"
     "      (tool missing, placeholder token, timeout), set retry_same_phase=true\n"
@@ -349,8 +351,11 @@ class LLMMasterRouter:
         }
         if execution_summary:
             payload["execution_summary"] = execution_summary
+        system = _MASTER_PLAN_PROMPT
+        if execution_summary:
+            system += _MASTER_PLAN_RETRY_CONTEXT
         msgs = [
-            LLMMessage(role="system", content=_MASTER_PLAN_PROMPT),
+            LLMMessage(role="system", content=system),
             LLMMessage(
                 role="user",
                 content=(
