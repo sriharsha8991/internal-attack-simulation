@@ -494,10 +494,35 @@ def _master_pick_phase(
         return {"master_done": True, "iteration": attempt, "log": log}
 
     if briefing.done or not briefing.phase:
-        msg = "[master_plan/pick] master signalled done; halting"
-        log.append(msg)
-        _log_step("MASTER/PICK", "→ DONE (master signalled done)")
-        return {"master_done": True, "iteration": attempt, "log": log}
+        # Defensive guard: if the LLM says done but there are still
+        # uncompleted phases, override and pick the first remaining one.
+        remaining = [p for p in available if p not in completed]
+        if remaining:
+            override_phase = remaining[0]
+            msg = (
+                f"[master_plan/pick] master signalled done but {len(remaining)} "
+                f"phases remain ({remaining}); overriding → {override_phase!r}"
+            )
+            log.append(msg)
+            _log_step(
+                "MASTER/PICK",
+                f"→ OVERRIDE done signal — {len(remaining)} phases remain, "
+                f"forcing {override_phase!r}",
+                level="warning",
+            )
+            briefing = PhaseBriefing(
+                phase=override_phase,
+                objective=f"Continue campaign: execute {override_phase} phase.",
+                constraints=briefing.constraints,
+                open_questions=briefing.open_questions,
+                rationale=f"Overridden — master signalled done prematurely with {remaining} phases remaining.",
+                done=False,
+            )
+        else:
+            msg = "[master_plan/pick] master signalled done; halting"
+            log.append(msg)
+            _log_step("MASTER/PICK", "→ DONE (master signalled done)")
+            return {"master_done": True, "iteration": attempt, "log": log}
 
     if available and briefing.phase not in available:
         msg = (
@@ -1446,20 +1471,30 @@ def build_graph(
     return g.compile(checkpointer=checkpointer)
 
 
-def _stream_graph(app, seed: dict[str, Any], run_config: dict[str, Any]) -> dict[str, Any]:
+def _stream_graph(app, seed: Any, run_config: dict[str, Any]) -> dict[str, Any]:
     """Stream graph updates, log each step, raise GraphInterrupt if paused.
 
     Shared between ``_run_engagement_inner`` (initial run) and ``_resume_graph``
     (webhook resume) so both use the same logging/interrupt logic.
-    """
-    logger.info(
-        "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
-        seed.get("available_phases"),
-        list((seed.get("foothold") or {}).keys()),
-        run_config.get("configurable", {}).get("thread_id"),
-    )
 
-    state: dict[str, Any] = dict(seed)
+    ``seed`` may be a plain dict (initial run) or a ``Command(resume=...)``
+    object (webhook resume).
+    """
+    is_resume = not isinstance(seed, dict)
+    if is_resume:
+        logger.info(
+            "[GRAPH][RESUME         ]  thread_id=%s",
+            run_config.get("configurable", {}).get("thread_id"),
+        )
+    else:
+        logger.info(
+            "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
+            seed.get("available_phases"),
+            list((seed.get("foothold") or {}).keys()),
+            run_config.get("configurable", {}).get("thread_id"),
+        )
+
+    state: dict[str, Any] = seed if isinstance(seed, dict) else {}
     step_count = 0
     _interrupted = False
     for chunk in app.stream(seed, config=run_config, stream_mode="updates"):

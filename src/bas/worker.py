@@ -147,6 +147,7 @@ def _serialise_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
         "current_phase": state.get("current_phase"),
         "available_phases": state.get("available_phases", []),
         "completed_phases": state.get("completed_phases", []),
+        "master_done": state.get("master_done"),
         "master_briefing": state.get("master_briefing"),
         "master_revisions_used": state.get("master_revisions_used"),
         "planner_attempts": state.get("planner_attempts"),
@@ -155,7 +156,8 @@ def _serialise_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
         "phase_history": list(state.get("phase_history") or []),
         "completed_stages": state.get("completed_stages", []),
         "stage_results": [
-            sr.model_dump(mode="json") for sr in state.get("stage_results", []) or []
+            sr.model_dump(mode="json") if hasattr(sr, "model_dump") else sr
+            for sr in state.get("stage_results", []) or []
         ],
         "memory": state.get("memory", {}),
         "foothold": state.get("foothold", {}),
@@ -207,7 +209,7 @@ def _run_engagement_inner(engagement_id: str) -> None:
 
     try:
         # 1. Validate phases against catalogue (the master picks the order).
-        requested_phases = list(request.phases or [])
+        requested_phases = [p.value if hasattr(p, 'value') else str(p) for p in (request.phases or [])]
         if requested_phases:
             _, unknown = resolve_phases_to_skills(requested_phases, skill_tool)
             if unknown:
@@ -329,8 +331,13 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
 
         compiled = _get_compiled_graph()
         run_config = {"configurable": {"thread_id": engagement_id}}
-        compiled.invoke(Command(resume=result_payload), config=run_config)
 
+        from .orchestrator.graph import _stream_graph
+        state = _stream_graph(
+            compiled, Command(resume=result_payload), run_config
+        )
+
+        record["state"] = _serialise_state(state)
         record["status"] = "completed"
         record["finished_at"] = now_iso()
         store.save(record)

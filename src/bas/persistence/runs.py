@@ -66,6 +66,7 @@ class RunStore:
     def save(self, record: dict[str, Any]) -> None:
         run_id = record["run_id"]
         payload = serialise(record)
+        self._dir.mkdir(parents=True, exist_ok=True)
         target = self._dir / f"{run_id}.json"
         tmp = target.with_suffix(".json.tmp")
 

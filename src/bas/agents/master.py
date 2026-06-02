@@ -171,13 +171,15 @@ _MASTER_PLAN_PROMPT = (
 
 _MASTER_PLAN_RETRY_CONTEXT = (
     "\nRETRY CONTEXT\n"
-    "  `execution_summary` is provided — you are re-planning after actual\n"
-    "  execution results. Analyse the summary:\n"
+    "  `execution_summary` is provided — you are reviewing results from the\n"
+    "  phase that just executed. Analyse the summary:\n"
     "    * If critical objectives were NOT met but the cause is fixable\n"
     "      (tool missing, placeholder token, timeout), set retry_same_phase=true\n"
     "      and list the specific issues in issues_to_fix.\n"
-    "    * If objectives WERE met or the phase is unachievable, set done=true\n"
-    "      or pick a different phase.\n"
+    "    * If objectives WERE met, pick the NEXT uncompleted phase from\n"
+    "      `available_phases` (do NOT set done=true — there are more phases).\n"
+    "    * Set done=true ONLY when ALL phases in `available_phases` are in\n"
+    "      `completed_phases` and there is genuinely nothing left to do.\n"
     "    * Never retry the same phase more than 2 times — check phase_history\n"
     "      for how many times the current phase appears with execution_outcome.\n"
 )
@@ -467,7 +469,7 @@ class LLMMasterRouter:
             ),
         ]
         try:
-            triage_text = self._llm.generate(
+            triage_text = self._llm.chat(
                 triage_msgs, grounding="skip", temperature=0.0
             )
             ability_names = [
