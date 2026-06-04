@@ -85,6 +85,7 @@ class IssueKind(str, Enum):
     TOOL_NOT_FOUND = "tool_not_found"
     TIMEOUT = "timeout"
     CROSS_VAR_LEAK = "cross_var_leak"
+    PSH_PARSE_ERROR = "psh_parse_error"
 
 
 class StageIssue(BaseModel):
@@ -115,6 +116,13 @@ _TOOL_NOT_FOUND_RE = re.compile(
     re.IGNORECASE,
 )
 _TIMEOUT_RE = re.compile(r"timed?\s*out|deadline exceeded", re.IGNORECASE)
+_PSH_PARSE_RE = re.compile(
+    r"Missing argument in parameter list"
+    r"|Missing expression after"
+    r"|unexpected token"
+    r"|FullyQualifiedErrorId\s*:\s*MissingArgument",
+    re.IGNORECASE,
+)
 _CROSS_VAR_RE = re.compile(
     r"\$(?:env:)?[A-Za-z_]\w*"   # $var or $env:var (PowerShell)
     r"|\$\([^)]+\)",             # $(command) subshell
@@ -256,6 +264,17 @@ def detect_issues(
                     kind=IssueKind.TIMEOUT,
                     detail="exit_code=-1" if stage.exit_code == -1
                            else f"stderr: {stage.stderr[:200]}",
+                ))
+
+            # PowerShell parse error (commas treated as arg separators, etc.)
+            if stage.exit_code != 0 and _PSH_PARSE_RE.search(stage.stderr):
+                issues.append(StageIssue(
+                    ability_id=ab.ability_id,
+                    ability_name=ab.name,
+                    stage_id=sid,
+                    stage_name=stage.stage_name,
+                    kind=IssueKind.PSH_PARSE_ERROR,
+                    detail=f"stderr: {stage.stderr[:200]}",
                 ))
 
             # Cross-ability variable leak (likely empty at runtime)
