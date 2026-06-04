@@ -65,6 +65,12 @@ from ..results import (
     parse_operation_result,
 )
 from ..tools.skill_tool import SkillTool
+from .memory import (
+    CampaignMemory,
+    _deep_merge,  # re-exported for backwards-compatible imports/tests
+    _merge_lists,  # noqa: F401  (re-export)
+    project_for_prompt,
+)
 from .state import DONE_SENTINEL, PhaseRecord, SessionState, StageResult
 
 logger = logging.getLogger(__name__)
@@ -77,40 +83,6 @@ logger = logging.getLogger(__name__)
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _merge_lists(base: list, delta: list) -> list:
-    """Union two lists preserving order, de-duping where items are comparable."""
-    out = list(base)
-    for item in delta:
-        # `in` works for both hashable and unhashable (dict/list) items via ==.
-        if item not in out:
-            out.append(item)
-    return out
-
-
-def _deep_merge(base: dict, delta: dict) -> dict:
-    """Recursively merge ``delta`` into a copy of ``base``.
-
-    Memory is a nested structure (e.g. ``{"network": {"cidr": ..., "live_hosts":
-    [...]}}``). A shallow top-level merge lets a later phase that emits only
-    ``{"network": {"cidr": ...}}`` clobber the entire prior ``network`` sub-dict,
-    silently dropping ``live_hosts``. Deep-merge preserves sibling sub-keys:
-
-      * nested dicts merge key-by-key (recursively),
-      * lists are unioned (append new items, preserve order),
-      * scalars — and any type mismatch — overwrite.
-    """
-    out = dict(base)
-    for k, v in delta.items():
-        cur = out.get(k)
-        if isinstance(cur, dict) and isinstance(v, dict):
-            out[k] = _deep_merge(cur, v)
-        elif isinstance(cur, list) and isinstance(v, list):
-            out[k] = _merge_lists(cur, v)
-        else:
-            out[k] = v
-    return out
 
 
 def _first_skill_for_phase(phase: str, skill_tool: SkillTool) -> str | None:
@@ -581,7 +553,7 @@ def _master_review(
         decision: MasterDecision = master.review_plan(
             briefing=briefing,
             plan_summary=plan_summary,
-            memory=state.get("memory", {}) or {},
+            memory=project_for_prompt(state.get("memory", {}) or {}),
             evaluator_verdict=eval_verdict,
             revise_budget=revise_budget,
         )
@@ -648,7 +620,7 @@ def _master_pick_phase(
     try:
         briefing: PhaseBriefing = master.plan_phase(
             foothold=state.get("foothold", {}) or {},
-            memory=state.get("memory", {}) or {},
+            memory=project_for_prompt(state.get("memory", {}) or {}),
             available_phases=available,
             completed_phases=completed,
             phase_history=list(state.get("phase_history") or []),
@@ -866,7 +838,9 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         # Inject the master's briefing and a COMPACT phase history into memory
         # so the planner sees full campaign context without blowing the context
         # window (full history can have many long key_command strings).
-        memory_with_brief = dict(state.get("memory") or {})
+        # Project memory (drop pending.*, cap narratives) before enriching with
+        # the briefing + compact phase history so the planner prompt stays bounded.
+        memory_with_brief = project_for_prompt(state.get("memory") or {})
         memory_with_brief["_master_briefing"] = briefing
         memory_with_brief["_phase_history"] = _phase_history_compact(
             list(state.get("phase_history") or [])
@@ -984,7 +958,7 @@ def _make_evaluate_node(evaluator: EvaluatorPolicy, skill_tool: SkillTool):
             verdict: EvaluatorVerdict = evaluator.evaluate(
                 skill=skill_tool.read(skill_name),
                 foothold=state.get("foothold", {}) or {},
-                memory=state.get("memory", {}) or {},
+                memory=project_for_prompt(state.get("memory", {}) or {}),
                 completed_stages=list(state.get("completed_stages") or []),
                 plan_summary=plan_summary,
                 push_success=False,
@@ -1203,7 +1177,7 @@ def _make_push_node(
                 state.get("master_briefing") or {"phase": phase}
             )
             mem_update: MemoryUpdate = master.update_memory(
-                memory=state.get("memory", {}) or {},
+                memory=project_for_prompt(state.get("memory", {}) or {}),
                 briefing=briefing,
                 plan_summary=push.plan_summary,
             )
@@ -1211,13 +1185,12 @@ def _make_push_node(
             logger.exception("[push] memory update failed: %s", exc)
             mem_update = MemoryUpdate(facts={}, narrative=f"committed {phase}")
 
-        # Deep-merge facts so nested sub-keys (e.g. network.live_hosts) survive
-        # a partial update from a later phase.
-        new_memory = _deep_merge(dict(state.get("memory") or {}), mem_update.facts or {})
-        narratives = list(new_memory.get("narratives") or [])
-        if mem_update.narrative:
-            narratives.append({"phase": phase, "ts": _now(), "text": mem_update.narrative})
-            new_memory["narratives"] = narratives
+        # Deep-merge facts (preserving nested sub-keys) + append the narrative.
+        mem = CampaignMemory.from_state(state)
+        mem.merge_facts(mem_update.facts).add_narrative(
+            phase=phase, text=mem_update.narrative, ts=_now()
+        )
+        new_memory = mem.data
 
         _persist_memory(state, new_memory, label=f"push/{phase}/{skill_name}")
 
@@ -1314,9 +1287,11 @@ def _make_push_node(
         }
 
         # ---- Phase 5: write pending.* memory keys --------------------------
+        pending_mem = CampaignMemory(new_memory)
         for sd in skills_buffer:
             for ab_name in sd.get("ability_names", []):
-                new_memory[f"pending.{phase}.{ab_name}"] = "awaiting_results"
+                pending_mem.add_pending(phase=phase, ability=ab_name)
+        new_memory = pending_mem.data
 
         # Do NOT add phase to completed_phases here — analyse_results owns
         # that decision after inspecting actual execution results.
@@ -1403,10 +1378,7 @@ def _make_analyse_results_node(master: MasterPolicy):
             phase = state.get("current_phase") or ""
 
             # Clear pending.* keys — they can't be verified without results
-            new_memory = dict(state.get("memory") or {})
-            pending_keys = [k for k in new_memory if k.startswith("pending.")]
-            for pk in pending_keys:
-                del new_memory[pk]
+            new_memory = CampaignMemory.from_state(state).clear_pending().data
 
             # Set execution_summary so master_plan sees timeout context
             timeout_summary = (
@@ -1479,7 +1451,7 @@ def _make_analyse_results_node(master: MasterPolicy):
                 results_dir=state.get("results_dir"),
                 operation_id=op_result.operation_id,
                 structural_summary=summary,
-                current_memory=state.get("memory", {}),
+                current_memory=project_for_prompt(state.get("memory", {}) or {}),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[analyse_results] LLM analysis failed: %s", exc)
@@ -1487,20 +1459,15 @@ def _make_analyse_results_node(master: MasterPolicy):
                 facts={}, narrative=f"analysis failed: {exc!r}"
             )
 
-        # 3. Promote pending.* → confirmed facts
-        new_memory = dict(state.get("memory") or {})
-        # Remove all pending.* keys — they were speculative
-        pending_keys = [k for k in new_memory if k.startswith("pending.")]
-        for pk in pending_keys:
-            del new_memory[pk]
-        # Deep-merge confirmed facts so nested sub-keys survive partial updates.
-        new_memory = _deep_merge(new_memory, mem_update.facts or {})
-        if mem_update.narrative:
-            narratives = list(new_memory.get("narratives") or [])
-            narratives.append({
-                "phase": phase, "ts": _now(), "text": mem_update.narrative
-            })
-            new_memory["narratives"] = narratives
+        # 3. Drop speculative pending.* keys, then deep-merge confirmed facts and
+        # append the narrative.
+        new_memory = (
+            CampaignMemory.from_state(state)
+            .clear_pending()
+            .merge_facts(mem_update.facts)
+            .add_narrative(phase=phase, text=mem_update.narrative, ts=_now())
+            .data
+        )
 
         _persist_memory(state, new_memory, label=f"analyse/{phase}/{op_result.operation_id[:8]}")
 

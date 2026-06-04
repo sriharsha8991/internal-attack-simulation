@@ -153,16 +153,21 @@ def _build_checkpointer(cfg: AppConfig) -> Any:
 
             from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore[import-not-found]
         except ImportError:
-            raise ImportError(
-                "checkpointer=sqlite requires 'langgraph-checkpoint-sqlite'; "
-                "install it with: uv add langgraph-checkpoint-sqlite"
-            ) from None
-        db_path = Path(cfg.execution.checkpoint_db)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False: the worker may resume an engagement from a
-        # different thread than the one that created the checkpoint.
-        conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        return SqliteSaver(conn)
+            # Degrade rather than crash at boot: an in-memory saver still works,
+            # it just won't survive a restart. Make the trade-off loud.
+            logger.error(
+                "[boot] checkpointer=sqlite but 'langgraph-checkpoint-sqlite' is "
+                "not installed; falling back to in-memory checkpointer — paused "
+                "engagements will NOT survive a restart. Install it with: "
+                "uv add langgraph-checkpoint-sqlite"
+            )
+        else:
+            db_path = Path(cfg.execution.checkpoint_db)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            # check_same_thread=False: the worker may resume an engagement from a
+            # different thread than the one that created the checkpoint.
+            conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            return SqliteSaver(conn)
     from langgraph.checkpoint.memory import MemorySaver
     return MemorySaver()
 
