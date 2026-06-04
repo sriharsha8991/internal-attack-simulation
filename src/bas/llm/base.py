@@ -96,6 +96,7 @@ class LLMProvider(Protocol):
         *,
         grounding: GroundingDepth = "skip",
         temperature: float | None = None,
+        thinking: str | None = None,
     ) -> T: ...
 
     # ---- grounding routing --------------------------------------------------

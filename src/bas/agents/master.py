@@ -367,7 +367,8 @@ class LLMMasterRouter:
             ),
         ]
         return self._llm.generate_structured(
-            msgs, PhaseBriefing, grounding="skip", temperature=self._temperature
+            msgs, PhaseBriefing, grounding="skip", temperature=self._temperature,
+            thinking="high",  # picking the next phase is the core strategic call
         )
 
     def review_plan(
@@ -398,7 +399,8 @@ class LLMMasterRouter:
             ),
         ]
         verdict = self._llm.generate_structured(
-            msgs, MasterDecision, grounding="skip", temperature=self._temperature
+            msgs, MasterDecision, grounding="skip", temperature=self._temperature,
+            thinking="medium",  # reviewing an existing plan, not generating one
         )
         # Hard guard: if budget is exhausted the master MUST commit.
         if revise_budget <= 0 and verdict.action == "revise":
@@ -439,7 +441,8 @@ class LLMMasterRouter:
             ),
         ]
         return self._llm.generate_structured(
-            msgs, MemoryUpdate, grounding="skip", temperature=0.0
+            msgs, MemoryUpdate, grounding="skip", temperature=0.0,
+            thinking="low",  # mechanical: fold this phase's intent into memory
         )
 
     def analyse_results(
@@ -518,7 +521,8 @@ class LLMMasterRouter:
             LLMMessage(role="user", content=extract_payload),
         ]
         return self._llm.generate_structured(
-            extract_msgs, MemoryUpdate, grounding="skip", temperature=0.0
+            extract_msgs, MemoryUpdate, grounding="skip", temperature=0.0,
+            thinking="medium",  # extracting confirmed facts from raw output
         )
 
     def build_feedback_payload(
@@ -533,19 +537,59 @@ class LLMMasterRouter:
 
         For each issue, look up the corrected command from the new plan and
         pair it with the original stage_id from the asset_map.
+
+        Matching strategy (cascading):
+        1. Exact ``(ability_name, stage_name)`` match against the new plan.
+        2. Positional match — map old abilities (from ``stage_id_map`` order)
+           to new plan abilities by index, then stages by index within each
+           ability.  This handles the common case where the planner generates
+           corrected commands under different names.
         """
         from ..client.feedback import AIStageChange
 
         stage_id_map = asset_map.get("stage_id_map", {})
         ability_name_to_id = asset_map.get("ability_name_to_id", {})
 
-        # Build lookup: {(ability_name, stage_name) -> new_command} from plan
-        new_commands: dict[tuple[str, str], str] = {}
+        # --- Strategy 1: exact (ability_name, stage_name) match -------------
+        exact_commands: dict[tuple[str, str], str] = {}
         for gen in current_plan.abilities:
             for stage in gen.stages:
-                new_commands[(gen.ability.name, stage.stage_name)] = (
+                exact_commands[(gen.ability.name, stage.stage_name)] = (
                     stage.command_template or ""
                 )
+
+        # --- Strategy 2: positional match (guarded) -------------------------
+        # Map old_ability[i] → new_plan.abilities[i], then old_stage[j] →
+        # new_plan.abilities[i].stages[j]. This is ONLY safe when the new plan
+        # has the exact same shape as the old one (same ability count, same
+        # per-ability stage count); otherwise a fresh LLM generation may have
+        # reordered/added/dropped abilities and a positional map would attach a
+        # corrected command to the WRONG stage (then push it apply_immediately).
+        # When shapes diverge we skip positional matching entirely and rely on
+        # the exact (name, name) match — a missed fix is far safer than a
+        # mis-applied one.
+        positional_commands: dict[tuple[str, str], str] = {}
+        old_ab_names = list(stage_id_map.keys())
+        shapes_align = len(current_plan.abilities) == len(old_ab_names) and all(
+            len(gen.stages) == len(stage_id_map.get(old_ab_names[i], {}))
+            for i, gen in enumerate(current_plan.abilities)
+        )
+        if not shapes_align:
+            logger.warning(
+                "[feedback] new plan shape (%d abilities) diverges from original "
+                "(%d abilities); skipping positional matching to avoid "
+                "mis-applying corrected commands",
+                len(current_plan.abilities),
+                len(old_ab_names),
+            )
+        else:
+            for i, gen in enumerate(current_plan.abilities):
+                old_ab_name = old_ab_names[i]
+                old_stage_names = list(stage_id_map.get(old_ab_name, {}).keys())
+                for j, stage in enumerate(gen.stages):
+                    cmd = stage.command_template or ""
+                    if cmd:
+                        positional_commands[(old_ab_name, old_stage_names[j])] = cmd
 
         changes: list[AIStageChange] = []
         seen: set[tuple[str, str]] = set()  # (ability_name, stage_name)
@@ -562,9 +606,15 @@ class LLMMasterRouter:
                 issue.stage_name, issue.stage_id
             )
 
-            new_cmd = new_commands.get(key)
+            # Cascade: exact → positional
+            new_cmd = exact_commands.get(key) or positional_commands.get(key)
             if not new_cmd:
-                continue  # no corrected command in the new plan
+                logger.warning(
+                    "[feedback] no corrected command for %s / %s — skipping",
+                    issue.ability_name,
+                    issue.stage_name,
+                )
+                continue
 
             changes.append(
                 AIStageChange(

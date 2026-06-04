@@ -140,7 +140,9 @@ class ExecutionConfig(StrictModel):
 
     result_wait_timeout: int = Field(default=600, ge=0, description="Seconds before timeout-resume fires.")
     max_result_size_mb: int = Field(default=10, ge=1)
-    checkpointer: Literal["memory", "sqlite"] = "memory"
+    # Default to sqlite so engagements paused at `interrupt("awaiting_results")`
+    # survive a process restart. The in-memory saver orphans any paused run.
+    checkpointer: Literal["memory", "sqlite"] = "sqlite"
     checkpoint_db: str = "runs/checkpoints.db"
 
 

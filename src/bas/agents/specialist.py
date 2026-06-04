@@ -314,7 +314,8 @@ class LLMPlanner:
         ]
         # Structured output ALWAYS ungrounded (provider constraint).
         plan = self._llm.generate_structured(
-            msgs, SpecialistPlan, grounding="skip", temperature=self._temperature
+            msgs, SpecialistPlan, grounding="skip", temperature=self._temperature,
+            thinking="high",  # generating tradecraft needs deep reasoning
         )
 
         # ---- shell-native syntax validation (every plan) -------------------
@@ -360,6 +361,7 @@ class LLMPlanner:
                 plan = self._llm.generate_structured(
                     fix_msgs, SpecialistPlan, grounding="skip",
                     temperature=self._temperature,
+                    thinking="high",
                 )
                 logger.info("[plan/shell-validate] re-generated plan after syntax fix")
             except Exception as exc:  # noqa: BLE001

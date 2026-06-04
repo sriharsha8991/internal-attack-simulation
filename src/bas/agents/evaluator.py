@@ -144,7 +144,8 @@ class LLMEvaluator:
             LLMMessage(role="user", content=user),
         ]
         return self._llm.generate_structured(
-            msgs, EvaluatorVerdict, grounding="skip", temperature=self._temperature
+            msgs, EvaluatorVerdict, grounding="skip", temperature=self._temperature,
+            thinking="medium",  # grading against criteria, not generating a plan
         )
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from .agents import (
@@ -139,16 +140,29 @@ def _build_planner(cfg: AppConfig, *, dry_run: bool) -> Planner:
 
 
 def _build_checkpointer(cfg: AppConfig) -> Any:
-    """Build a LangGraph checkpointer from config."""
+    """Build a LangGraph checkpointer from config.
+
+    For sqlite we open the connection directly (rather than
+    ``SqliteSaver.from_conn_string``, which is a context manager that would
+    close the DB on ``__exit__``) so the saver stays usable for the whole
+    process lifetime — resumes happen on a later request, long after build.
+    """
     if cfg.execution.checkpointer == "sqlite":
         try:
+            import sqlite3
+
             from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore[import-not-found]
         except ImportError:
             raise ImportError(
                 "checkpointer=sqlite requires 'langgraph-checkpoint-sqlite'; "
                 "install it with: uv add langgraph-checkpoint-sqlite"
             ) from None
-        return SqliteSaver.from_conn_string(cfg.execution.checkpoint_db)
+        db_path = Path(cfg.execution.checkpoint_db)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False: the worker may resume an engagement from a
+        # different thread than the one that created the checkpoint.
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        return SqliteSaver(conn)
     from langgraph.checkpoint.memory import MemorySaver
     return MemorySaver()
 

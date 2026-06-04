@@ -79,6 +79,40 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _merge_lists(base: list, delta: list) -> list:
+    """Union two lists preserving order, de-duping where items are comparable."""
+    out = list(base)
+    for item in delta:
+        # `in` works for both hashable and unhashable (dict/list) items via ==.
+        if item not in out:
+            out.append(item)
+    return out
+
+
+def _deep_merge(base: dict, delta: dict) -> dict:
+    """Recursively merge ``delta`` into a copy of ``base``.
+
+    Memory is a nested structure (e.g. ``{"network": {"cidr": ..., "live_hosts":
+    [...]}}``). A shallow top-level merge lets a later phase that emits only
+    ``{"network": {"cidr": ...}}`` clobber the entire prior ``network`` sub-dict,
+    silently dropping ``live_hosts``. Deep-merge preserves sibling sub-keys:
+
+      * nested dicts merge key-by-key (recursively),
+      * lists are unioned (append new items, preserve order),
+      * scalars — and any type mismatch — overwrite.
+    """
+    out = dict(base)
+    for k, v in delta.items():
+        cur = out.get(k)
+        if isinstance(cur, dict) and isinstance(v, dict):
+            out[k] = _deep_merge(cur, v)
+        elif isinstance(cur, list) and isinstance(v, list):
+            out[k] = _merge_lists(cur, v)
+        else:
+            out[k] = v
+    return out
+
+
 def _first_skill_for_phase(phase: str, skill_tool: SkillTool) -> str | None:
     """Return the canonical playbook (first skill) registered for a phase."""
     if not phase:
@@ -102,6 +136,74 @@ def _log_step(tag: str, msg: str, *, level: str = "info") -> None:
     The fixed-width tag makes it easy to grep / column-align in log viewers.
     """
     getattr(logger, level)("[GRAPH][%-16s]  %s", tag, msg)
+
+
+def _persist_memory(state: "SessionState", memory: dict[str, Any], *, label: str = "") -> None:
+    """Write the agent's memory and campaign progress to disk as JSON.
+
+    File: ``<results_dir>/../memory.json`` (i.e. ``engagements/<id>/memory.json``).
+    Each write is atomic (tmp + rename) and overwrites the previous snapshot.
+
+    The snapshot includes everything the agent needs to resume:
+    - ``memory``: structured facts, narratives, pending keys
+    - ``campaign_progress``: completed/available/current phases, phase history
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    results_dir = state.get("results_dir")
+    if not results_dir:
+        return
+    engagement_dir = Path(results_dir).parent
+    target = engagement_dir / "memory.json"
+    tmp = target.with_suffix(".json.tmp")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Build compact phase history (drop verbose key_commands)
+        phase_history = []
+        for rec in (state.get("phase_history") or []):
+            phase_history.append({
+                "phase": rec.get("phase"),
+                "objective": rec.get("objective"),
+                "outcome": rec.get("outcome"),
+                "skills_used": rec.get("skills_used"),
+                "techniques_used": rec.get("techniques_used"),
+                "ability_names": (rec.get("ability_names") or [])[:10],
+                "execution_outcome": rec.get("execution_outcome"),
+                "memory_delta_keys": rec.get("memory_delta_keys"),
+            })
+
+        completed = list(state.get("completed_phases") or [])
+        available = list(state.get("available_phases") or [])
+        remaining = [p for p in available if p not in completed]
+
+        snapshot = {
+            "run_id": state.get("run_id", ""),
+            "updated_at": _now(),
+            "label": label,
+            "campaign_progress": {
+                "current_phase": state.get("current_phase", ""),
+                "completed_phases": completed,
+                "available_phases": available,
+                "remaining_phases": remaining,
+                "iteration": state.get("iteration", 0),
+                "phase_history": phase_history,
+            },
+            "memory": memory,
+        }
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+        logger.debug(
+            "[memory] persisted %d keys to %s (%s) — completed=%s remaining=%s",
+            len(memory), target, label, completed, remaining,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("[memory] failed to persist memory to %s", target, exc_info=True)
 
 
 def _phase_history_compact(
@@ -153,6 +255,10 @@ def _extract_prior_issues(state: "SessionState") -> list:
         if outcome.get("operation_id"):
             op_id = outcome["operation_id"]
             break
+
+    # Fallback: check phase_asset_map (populated by analyse_results)
+    if not op_id:
+        op_id = asset_map.get("operation_id")
 
     if not op_id:
         return []
@@ -302,16 +408,79 @@ def _log_proposal(
 # ---------------------------------------------------------------------------
 
 
+def _load_memory_from_disk(results_dir: str | None) -> dict[str, Any]:
+    """Reload the full memory snapshot from ``memory.json``.
+
+    Returns the complete snapshot dict with keys:
+    - ``memory``: the agent's structured facts/narratives
+    - ``campaign_progress``: completed_phases, phase_history, etc.
+
+    Returns empty dict if file not found or unreadable.
+    """
+    import json
+    from pathlib import Path
+
+    if not results_dir:
+        return {}
+    mem_file = Path(results_dir).parent / "memory.json"
+    if not mem_file.is_file():
+        return {}
+    try:
+        with mem_file.open("r", encoding="utf-8") as f:
+            snapshot = json.load(f)
+        progress = snapshot.get("campaign_progress", {})
+        mem = snapshot.get("memory", {})
+        logger.info(
+            "[memory] reloaded from %s (label=%s) — "
+            "memory_keys=%d completed=%s current=%s remaining=%s",
+            mem_file,
+            snapshot.get("label", ""),
+            len(mem),
+            progress.get("completed_phases", []),
+            progress.get("current_phase", ""),
+            progress.get("remaining_phases", []),
+        )
+        return snapshot
+    except Exception:  # noqa: BLE001
+        logger.warning("[memory] failed to reload from %s", mem_file, exc_info=True)
+        return {}
+
+
 def _init_node(state: SessionState) -> dict[str, Any]:
     """Seed defaults exactly once per run."""
     run_id = state.get("run_id") or uuid.uuid4().hex
     phases = list(state.get("available_phases") or [])
     foothold_keys = list((state.get("foothold") or {}).keys())
     _log_step("INIT", f"run_id={run_id} phases={phases} foothold_keys={foothold_keys}")
+
+    # Prefer state memory; fall back to disk snapshot if empty (crash recovery).
+    memory = state.get("memory", {}) or {}
+    completed_phases = list(state.get("completed_phases") or [])
+    phase_history = list(state.get("phase_history") or [])
+    current_phase = state.get("current_phase", "") or ""
+
+    if not memory:
+        snapshot = _load_memory_from_disk(state.get("results_dir"))
+        if snapshot:
+            memory = snapshot.get("memory", {})
+            progress = snapshot.get("campaign_progress", {})
+            # Restore phase tracking if state doesn't have it
+            if not completed_phases:
+                completed_phases = list(progress.get("completed_phases") or [])
+            if not phase_history:
+                phase_history = list(progress.get("phase_history") or [])
+            if not current_phase:
+                current_phase = progress.get("current_phase", "")
+            _log_step(
+                "INIT",
+                f"recovered from disk — completed={completed_phases} "
+                f"current={current_phase!r} memory_keys={len(memory)}",
+            )
+
     return {
         "run_id": run_id,
         "foothold": state.get("foothold", {}) or {},
-        "memory": state.get("memory", {}) or {},
+        "memory": memory,
         "completed_stages": state.get("completed_stages", []) or [],
         "stage_results": state.get("stage_results", []) or [],
         # Always reset iteration and master_done so re-running on the same
@@ -322,8 +491,8 @@ def _init_node(state: SessionState) -> dict[str, Any]:
         "log": state.get("log", []) or [],
         # master
         "available_phases": list(state.get("available_phases") or []),
-        "completed_phases": list(state.get("completed_phases") or []),
-        "current_phase": state.get("current_phase", "") or "",
+        "completed_phases": completed_phases,
+        "current_phase": current_phase,
         "master_briefing": state.get("master_briefing"),
         "master_revisions_used": int(state.get("master_revisions_used", 0) or 0),
         "max_master_revisions": int(state.get("max_master_revisions", 1) or 1),
@@ -336,7 +505,7 @@ def _init_node(state: SessionState) -> dict[str, Any]:
         "max_planner_tool_calls": int(state.get("max_planner_tool_calls", 20) or 20),
         # proposals + plan state
         "proposal_log": list(state.get("proposal_log") or []),
-        "phase_history": list(state.get("phase_history") or []),
+        "phase_history": phase_history,
         "phase_skills": list(state.get("phase_skills") or []),
         "phase_skill_index": int(state.get("phase_skill_index", 0) or 0),
         "phase_skills_buffer": [],
@@ -1042,14 +1211,15 @@ def _make_push_node(
             logger.exception("[push] memory update failed: %s", exc)
             mem_update = MemoryUpdate(facts={}, narrative=f"committed {phase}")
 
-        new_memory = dict(state.get("memory") or {})
-        # Merge facts (shallow); preserve prior keys unless overwritten.
-        for k, v in (mem_update.facts or {}).items():
-            new_memory[k] = v
+        # Deep-merge facts so nested sub-keys (e.g. network.live_hosts) survive
+        # a partial update from a later phase.
+        new_memory = _deep_merge(dict(state.get("memory") or {}), mem_update.facts or {})
         narratives = list(new_memory.get("narratives") or [])
         if mem_update.narrative:
             narratives.append({"phase": phase, "ts": _now(), "text": mem_update.narrative})
             new_memory["narratives"] = narratives
+
+        _persist_memory(state, new_memory, label=f"push/{phase}/{skill_name}")
 
         msg = (
             f"[push] phase={phase} skill={skill_name} success={push.success} "
@@ -1202,7 +1372,7 @@ def _derive_phase_done(
     passed_count = sum(1 for a in op_result.abilities if a.passed)
     if passed_count == 0:
         return False
-    critical_kinds = {IssueKind.PLACEHOLDER_TOKEN, IssueKind.TOOL_NOT_FOUND}
+    critical_kinds = {IssueKind.PLACEHOLDER_TOKEN, IssueKind.TOOL_NOT_FOUND, IssueKind.PSH_PARSE_ERROR}
     critical_issues = [i for i in issues if i.kind in critical_kinds]
     return len(critical_issues) == 0
 
@@ -1214,6 +1384,18 @@ def _make_analyse_results_node(master: MasterPolicy):
         """Pause for backend results, then parse + LLM-analyse execution output."""
         _log_step("ANALYSE", "pausing graph — awaiting backend results")
         result_data = interrupt("awaiting_results")
+
+        # Safety: if checkpointer didn't restore memory, reload from disk.
+        if not state.get("memory"):
+            snapshot = _load_memory_from_disk(state.get("results_dir"))
+            if snapshot:
+                state = dict(state)  # type: ignore[assignment]
+                state["memory"] = snapshot.get("memory", {})
+                progress = snapshot.get("campaign_progress", {})
+                if not state.get("completed_phases") and progress.get("completed_phases"):
+                    state["completed_phases"] = progress["completed_phases"]
+                if not state.get("phase_history") and progress.get("phase_history"):
+                    state["phase_history"] = progress["phase_history"]
 
         # Handle timeout resume — no results to analyse
         if isinstance(result_data, dict) and result_data.get("timeout"):
@@ -1257,6 +1439,8 @@ def _make_analyse_results_node(master: MasterPolicy):
                 f"setting retry_same_phase=True for phase={phase!r}",
                 level="warning",
             )
+
+            _persist_memory(state, new_memory, label=f"analyse/timeout/{phase}")
 
             return {
                 "memory": new_memory,
@@ -1309,15 +1493,16 @@ def _make_analyse_results_node(master: MasterPolicy):
         pending_keys = [k for k in new_memory if k.startswith("pending.")]
         for pk in pending_keys:
             del new_memory[pk]
-        # Merge confirmed facts from LLM
-        for k, v in (mem_update.facts or {}).items():
-            new_memory[k] = v
+        # Deep-merge confirmed facts so nested sub-keys survive partial updates.
+        new_memory = _deep_merge(new_memory, mem_update.facts or {})
         if mem_update.narrative:
             narratives = list(new_memory.get("narratives") or [])
             narratives.append({
                 "phase": phase, "ts": _now(), "text": mem_update.narrative
             })
             new_memory["narratives"] = narratives
+
+        _persist_memory(state, new_memory, label=f"analyse/{phase}/{op_result.operation_id[:8]}")
 
         # 4. Phase done decision
         phase_done = _derive_phase_done(op_result, issues)
