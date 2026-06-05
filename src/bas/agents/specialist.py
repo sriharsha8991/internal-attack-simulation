@@ -206,9 +206,25 @@ class LLMPlanner:
         phase_stage = getattr(skill.frontmatter, "stage", None) or ""
         issues_to_fix = state.get("issues_to_fix") or []
         is_retry = bool(feedback) or bool(issues_to_fix)
-        needs_phase_research = is_retry and self._PHASE_RESEARCH_QUERIES.get(phase_stage.lower())
-        if needs_phase_research:
-            phase_query = self._PHASE_RESEARCH_QUERIES[phase_stage.lower()]
+        phase_query = self._PHASE_RESEARCH_QUERIES.get(phase_stage.lower())
+        # Research the phase's current TTPs when (a) this is a retry/blocked, or
+        # (b) on a FIRST pass the cheap grounding classifier judges that fresh
+        # web evidence would materially help. (b) lets the planner "go beyond the
+        # skill" with up-to-date tradecraft instead of relying only on baked-in
+        # knowledge. classify_grounding_depth is ungrounded (no budget cost); the
+        # research() call below is the only grounded one and still fails closed
+        # on the per-run grounded-call budget.
+        needs_phase_research = False
+        if phase_query:
+            if is_retry:
+                needs_phase_research = True
+            else:
+                try:
+                    depth = self._llm.classify_grounding_depth(phase_query)
+                    needs_phase_research = depth in ("light", "deep")
+                except Exception as exc:  # noqa: BLE001 - classify is best-effort
+                    logger.warning("[plan] grounding classify failed: %s", exc)
+        if needs_phase_research and phase_query:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
             phase_query_full = (
                 f"{phase_query}\n"
