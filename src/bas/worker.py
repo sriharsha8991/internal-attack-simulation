@@ -372,6 +372,29 @@ def _start_result_poller(engagement_id: str) -> None:
     t.start()
 
 
+def _persist_polled_result(engagement_id: str, operation_id: str, detail: dict) -> None:
+    """Save a polled operation detail to the result store (idempotent).
+
+    Mirrors what the /results webhook route does so analyse_results can read the
+    full per-stage stdout/stderr from disk and the operation has an audit record.
+    """
+    results_store = _state.get("results_store")
+    if results_store is None:
+        return
+    try:
+        if results_store.exists(engagement_id, operation_id):
+            return  # webhook (or a prior poll) already saved it
+        results_store.save(engagement_id, operation_id, detail)
+        logger.info(
+            "[poller] persisted pulled result engagement=%s op=%s",
+            engagement_id, operation_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[poller] failed to persist pulled result op=%s: %s", operation_id, exc
+        )
+
+
 def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
     """Poll the operation for this phase until it completes, then resume."""
     import time
@@ -408,6 +431,11 @@ def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
                         "[poller] %s op=%s complete — resuming with pulled result",
                         engagement_id, op_id,
                     )
+                    # Persist to the result store BEFORE resuming, exactly like
+                    # the /results webhook does — analyse_results reads full stage
+                    # output from runs/<id>/results/<op>.json, and it's the audit
+                    # record. Idempotent: skip if the webhook already saved it.
+                    _persist_polled_result(engagement_id, op_id, detail)
                     # Clear active flag BEFORE resuming so the next phase's
                     # awaiting_results can start a fresh poller.
                     with _active_pollers_guard:

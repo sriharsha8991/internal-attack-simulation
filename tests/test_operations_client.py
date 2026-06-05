@@ -197,3 +197,37 @@ def test_adapt_operation_detail_builds_stages_from_logs():
     assert passed["whoami"] == "passed"
     assert passed["nmap -sV 10.0.0.0/24"] == "failed"
     assert stages[0].stdout == "root\n"
+
+
+# ---- poller result persistence --------------------------------------------
+
+
+class _FakeResultStore:
+    def __init__(self, existing=False):
+        self._existing = existing
+        self.saved: list[tuple] = []
+
+    def exists(self, eng, op):
+        return self._existing
+
+    def save(self, eng, op, payload):
+        self.saved.append((eng, op, payload))
+
+
+def test_persist_polled_result_saves_when_new(monkeypatch):
+    import bas.worker as worker
+
+    rs = _FakeResultStore(existing=False)
+    monkeypatch.setitem(worker._state, "results_store", rs)
+    detail = {"operation_id": "op1", "status": "completed", "execution_logs": []}
+    worker._persist_polled_result("eng1", "op1", detail)
+    assert rs.saved == [("eng1", "op1", detail)]
+
+
+def test_persist_polled_result_skips_when_already_saved(monkeypatch):
+    import bas.worker as worker
+
+    rs = _FakeResultStore(existing=True)  # webhook already saved it
+    monkeypatch.setitem(worker._state, "results_store", rs)
+    worker._persist_polled_result("eng1", "op1", {"operation_id": "op1"})
+    assert rs.saved == []  # idempotent — no double write
