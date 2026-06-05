@@ -270,6 +270,128 @@ class _DryRunStubPlanner:
 
 
 # ---------------------------------------------------------------------------
+# Result poller — pull results via GET /operations instead of waiting for the
+# /results webhook. Started when an engagement enters awaiting_results; resumes
+# the graph with the real operation detail the moment it completes. Coexists
+# with the webhook (both call _resume_graph, which is idempotent) and the
+# timeout scanner (the dead-agent backstop).
+# ---------------------------------------------------------------------------
+
+_active_pollers: set[str] = set()
+_active_pollers_guard = threading.Lock()
+
+
+def _current_phase_adversary(engagement_id: str) -> tuple[str | None, str | None]:
+    """Read (current_phase, adversary_id) for the paused engagement from the
+    graph checkpoint — that's where push recorded the phase_asset_map."""
+    try:
+        compiled = _get_compiled_graph()
+        snap = compiled.get_state({"configurable": {"thread_id": engagement_id}})
+        values = getattr(snap, "values", None) or {}
+        phase = values.get("current_phase")
+        asset_map = (values.get("phase_asset_map") or {}).get(phase, {})
+        return phase, asset_map.get("adversary_id")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[poller] could not read state for %s: %s", engagement_id, exc)
+        return None, None
+
+
+def _discover_operation_id(bas: Any, adversary_id: str) -> str | None:
+    """Find the backend operation auto-created for our adversary via GET /operations."""
+    try:
+        ops = bas.operations.list()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[poller] GET /operations failed: %s", exc)
+        return None
+
+    def _adv(o: dict) -> str:
+        return str(o.get("adversary_id") or o.get("adversaryId") or "")
+
+    def _opid(o: dict) -> str | None:
+        return o.get("operation_id") or o.get("id") or o.get("operationId")
+
+    candidates = [o for o in ops if isinstance(o, dict) and _adv(o) == str(adversary_id)]
+    if not candidates:
+        return None
+    # Most recent first.
+    candidates.sort(
+        key=lambda o: str(o.get("created_at") or o.get("started_at") or ""),
+        reverse=True,
+    )
+    return _opid(candidates[0])
+
+
+def _start_result_poller(engagement_id: str) -> None:
+    """Spawn the background result poller for an engagement (idempotent)."""
+    cfg = _state.get("cfg")
+    if cfg is None or not cfg.execution.result_poll_enabled:
+        return
+    bas = _state.get("bas")
+    if bas is not None and getattr(bas, "dry_run", False):
+        return  # no real backend to poll in dry-run
+    with _active_pollers_guard:
+        if engagement_id in _active_pollers:
+            return
+        _active_pollers.add(engagement_id)
+    t = threading.Thread(
+        target=_poll_results_loop,
+        args=(engagement_id, cfg.execution.result_poll_interval),
+        daemon=True,
+        name=f"poller-{engagement_id[:8]}",
+    )
+    t.start()
+
+
+def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
+    """Poll the operation for this phase until it completes, then resume."""
+    import time
+
+    from .client.operations import is_operation_complete
+
+    bas = _state["bas"]
+    store: RunStore = _state["store"]
+    op_id: str | None = None
+    phase, adversary_id = _current_phase_adversary(engagement_id)
+    logger.info(
+        "[poller] started for %s phase=%s adversary=%s interval=%ds",
+        engagement_id, phase, adversary_id, interval_s,
+    )
+    try:
+        while True:
+            rec = store.get(engagement_id)
+            if not rec or rec.get("status") != "awaiting_results":
+                return  # resumed by webhook / scanner / completed — done
+
+            if op_id is None and adversary_id:
+                op_id = _discover_operation_id(bas, adversary_id)
+                if op_id:
+                    logger.info("[poller] %s discovered op=%s", engagement_id, op_id)
+
+            if op_id:
+                try:
+                    detail = bas.operations.get_detail(op_id)
+                except Exception as exc:  # noqa: BLE001
+                    detail = None
+                    logger.warning("[poller] get_detail op=%s failed: %s", op_id, exc)
+                if detail and is_operation_complete(detail):
+                    logger.info(
+                        "[poller] %s op=%s complete — resuming with pulled result",
+                        engagement_id, op_id,
+                    )
+                    # Clear active flag BEFORE resuming so the next phase's
+                    # awaiting_results can start a fresh poller.
+                    with _active_pollers_guard:
+                        _active_pollers.discard(engagement_id)
+                    _resume_graph(engagement_id, detail)
+                    return
+
+            time.sleep(interval_s)
+    finally:
+        with _active_pollers_guard:
+            _active_pollers.discard(engagement_id)
+
+
+# ---------------------------------------------------------------------------
 # State serialisation
 # ---------------------------------------------------------------------------
 
@@ -408,6 +530,7 @@ def _run_engagement_inner(engagement_id: str) -> None:
         record["awaiting_since"] = now_iso()
         store.save(record)
         logger.info("[engagement %s] PAUSED — awaiting backend results", engagement_id)
+        _start_result_poller(engagement_id)
         return
     except Exception as exc:  # noqa: BLE001
         record["status"] = "failed"
@@ -486,6 +609,7 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
         record["awaiting_since"] = now_iso()
         store.save(record)
         logger.info("[resume] engagement %s paused again — awaiting results", engagement_id)
+        _start_result_poller(engagement_id)
     except Exception as exc:  # noqa: BLE001
         record["status"] = "failed"
         record["error"] = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"

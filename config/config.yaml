@@ -37,6 +37,8 @@ run:
 execution:
   result_wait_timeout: 6000              # soft window (100 min): past this it's "overdue" but stays parked — late results still resume it
   result_hard_timeout: 12000             # hard cap (200 min): force-abandon a still-waiting engagement (dead-agent backstop). 0 = never
+  result_poll_enabled: true              # pull results by polling GET /operations/{id} (vs only the /results webhook)
+  result_poll_interval: 420              # seconds between operation-detail polls (7 min)
   max_result_size_mb: 10
   checkpointer: sqlite                   # memory | sqlite — sqlite survives restarts (paused engagements)
   checkpoint_db: runs/checkpoints.db     # only used when checkpointer=sqlite

@@ -113,3 +113,39 @@ def test_dry_run_short_circuits():
     # no lifecycle POSTs hit the transport in dry-run
     api.start("op1")
     assert all(method == "GET" or path.startswith("/operations") for method, path in t.calls) or not t.calls
+
+
+# ---- worker operation discovery -------------------------------------------
+
+
+class _FakeBas:
+    def __init__(self, ops):
+        class _Ops:
+            def list(_self):
+                return ops
+        self.operations = _Ops()
+
+
+def test_discover_operation_id_matches_adversary_and_picks_latest():
+    from bas.worker import _discover_operation_id
+
+    bas = _FakeBas([
+        {"operation_id": "old", "adversary_id": "ADV", "created_at": "2026-01-01T00:00:00"},
+        {"operation_id": "new", "adversary_id": "ADV", "created_at": "2026-06-01T00:00:00"},
+        {"operation_id": "other", "adversary_id": "ZZZ", "created_at": "2026-06-02T00:00:00"},
+    ])
+    assert _discover_operation_id(bas, "ADV") == "new"  # latest matching adversary
+
+
+def test_discover_operation_id_none_when_no_match():
+    from bas.worker import _discover_operation_id
+
+    bas = _FakeBas([{"operation_id": "x", "adversary_id": "OTHER"}])
+    assert _discover_operation_id(bas, "ADV") is None
+
+
+def test_discover_operation_id_handles_camelcase_fields():
+    from bas.worker import _discover_operation_id
+
+    bas = _FakeBas([{"operationId": "camel", "adversaryId": "ADV"}])
+    assert _discover_operation_id(bas, "ADV") == "camel"
