@@ -314,15 +314,6 @@ class MasterPolicy(Protocol):
         current_memory: dict,
     ) -> MemoryUpdate: ...
 
-    def build_feedback_payload(
-        self,
-        *,
-        issues: list,
-        current_plan: Any,
-        asset_map: dict,
-        operation_id: str,
-    ) -> list: ...
-
 
 class LLMMasterRouter:
     """Default master router. Three LLM round-trips per phase (plan, review,
@@ -525,111 +516,6 @@ class LLMMasterRouter:
             thinking="medium",  # extracting confirmed facts from raw output
         )
 
-    def build_feedback_payload(
-        self,
-        *,
-        issues: list,
-        current_plan: Any,
-        asset_map: dict,
-        operation_id: str,
-    ) -> list:
-        """Build a list of AIStageChange dicts for failed stages.
-
-        For each issue, look up the corrected command from the new plan and
-        pair it with the original stage_id from the asset_map.
-
-        Matching strategy (cascading):
-        1. Exact ``(ability_name, stage_name)`` match against the new plan.
-        2. Positional match — map old abilities (from ``stage_id_map`` order)
-           to new plan abilities by index, then stages by index within each
-           ability.  This handles the common case where the planner generates
-           corrected commands under different names.
-        """
-        from ..client.feedback import AIStageChange
-
-        stage_id_map = asset_map.get("stage_id_map", {})
-        ability_name_to_id = asset_map.get("ability_name_to_id", {})
-
-        # --- Strategy 1: exact (ability_name, stage_name) match -------------
-        exact_commands: dict[tuple[str, str], str] = {}
-        for gen in current_plan.abilities:
-            for stage in gen.stages:
-                exact_commands[(gen.ability.name, stage.stage_name)] = (
-                    stage.command_template or ""
-                )
-
-        # --- Strategy 2: positional match (guarded) -------------------------
-        # Map old_ability[i] → new_plan.abilities[i], then old_stage[j] →
-        # new_plan.abilities[i].stages[j]. This is ONLY safe when the new plan
-        # has the exact same shape as the old one (same ability count, same
-        # per-ability stage count); otherwise a fresh LLM generation may have
-        # reordered/added/dropped abilities and a positional map would attach a
-        # corrected command to the WRONG stage (then push it apply_immediately).
-        # When shapes diverge we skip positional matching entirely and rely on
-        # the exact (name, name) match — a missed fix is far safer than a
-        # mis-applied one.
-        positional_commands: dict[tuple[str, str], str] = {}
-        old_ab_names = list(stage_id_map.keys())
-        shapes_align = len(current_plan.abilities) == len(old_ab_names) and all(
-            len(gen.stages) == len(stage_id_map.get(old_ab_names[i], {}))
-            for i, gen in enumerate(current_plan.abilities)
-        )
-        if not shapes_align:
-            logger.warning(
-                "[feedback] new plan shape (%d abilities) diverges from original "
-                "(%d abilities); skipping positional matching to avoid "
-                "mis-applying corrected commands",
-                len(current_plan.abilities),
-                len(old_ab_names),
-            )
-        else:
-            for i, gen in enumerate(current_plan.abilities):
-                old_ab_name = old_ab_names[i]
-                old_stage_names = list(stage_id_map.get(old_ab_name, {}).keys())
-                for j, stage in enumerate(gen.stages):
-                    cmd = stage.command_template or ""
-                    if cmd:
-                        positional_commands[(old_ab_name, old_stage_names[j])] = cmd
-
-        changes: list[AIStageChange] = []
-        seen: set[tuple[str, str]] = set()  # (ability_name, stage_name)
-
-        for issue in issues:
-            key = (issue.ability_name, issue.stage_name)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            # Resolve original IDs
-            ab_id = ability_name_to_id.get(issue.ability_name, issue.ability_id)
-            sid = stage_id_map.get(issue.ability_name, {}).get(
-                issue.stage_name, issue.stage_id
-            )
-
-            # Cascade: exact → positional
-            new_cmd = exact_commands.get(key) or positional_commands.get(key)
-            if not new_cmd:
-                logger.warning(
-                    "[feedback] no corrected command for %s / %s — skipping",
-                    issue.ability_name,
-                    issue.stage_name,
-                )
-                continue
-
-            changes.append(
-                AIStageChange(
-                    operation_id=operation_id,
-                    ability_id=ab_id,
-                    stage_id=sid,
-                    suggested_command_template=new_cmd,
-                    reason=f"{issue.kind.value}: {issue.detail[:200]}",
-                    confidence=0.9,
-                    apply_immediately=True,
-                )
-            )
-
-        return changes
-
 
 class StaticMasterRouter:
     """Deterministic master used in tests/dry-run.
@@ -688,13 +574,3 @@ class StaticMasterRouter:
             facts={},
             narrative=f"static analysis of operation {operation_id}",
         )
-
-    def build_feedback_payload(
-        self,
-        *,
-        issues: list,
-        current_plan: Any,
-        asset_map: dict,
-        operation_id: str,
-    ) -> list:
-        return []  # static router never generates feedback

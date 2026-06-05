@@ -209,45 +209,6 @@ def _phase_history_compact(
     return result
 
 
-def _extract_prior_issues(state: "SessionState") -> list:
-    """Pull StageIssue objects from the last execution for the current phase.
-
-    Reconstructs issues from the stored result JSON via the parser. Falls back
-    to an empty list if no results are available yet.
-    """
-    phase = state.get("current_phase") or ""
-    asset_map = (state.get("phase_asset_map") or {}).get(phase, {})
-    stage_id_map = asset_map.get("stage_id_map", {})
-
-    # Get the last execution_outcome from phase_history
-    history = state.get("phase_history") or []
-    op_id: str | None = None
-    for entry in reversed(history):
-        outcome = entry.get("execution_outcome") or {}
-        if outcome.get("operation_id"):
-            op_id = outcome["operation_id"]
-            break
-
-    # Fallback: check phase_asset_map (populated by analyse_results)
-    if not op_id:
-        op_id = asset_map.get("operation_id")
-
-    if not op_id:
-        return []
-
-    results_dir = state.get("results_dir")
-    if not results_dir:
-        return []
-
-    from ..tools.master_tools import _load_and_parse
-
-    _, op_result = _load_and_parse(results_dir, op_id)
-    if op_result is None:
-        return []
-
-    return detect_issues(op_result, stage_id_map)
-
-
 def _skill_data_from_push(
     skill_name: str,
     push: "PushResult",
@@ -1074,68 +1035,14 @@ def _make_push_node(
 
         plan = SpecialistPlan.model_validate(raw_plan)
 
-        # ---- retry detection (Phase 7) -------------------------------------
-        # If the master flagged retry_same_phase AND we have prior asset_map
-        # for this phase, send feedback to fix failed stages instead of
-        # creating new abilities/adversaries.
-        completed_phases = list(state.get("completed_phases") or [])
-        prior_asset_map = (state.get("phase_asset_map") or {}).get(phase)
-        is_retry = (
-            prior_asset_map is not None
-            and phase not in completed_phases
-            and bool(state.get("retry_same_phase"))
-        )
-
-        if is_retry:
-            _log_step("PUSH", f"→ RETRY PATH  phase={phase!r}", level="info")
-            op_id = prior_asset_map.get("operation_id", "")
-            prior_issues = _extract_prior_issues(state)
-
-            changes = master.build_feedback_payload(
-                issues=prior_issues,
-                current_plan=plan,
-                asset_map=prior_asset_map,
-                operation_id=op_id,
-            )
-            if changes:
-                bas.feedback.send(
-                    operation_id=op_id,
-                    changes=changes,
-                    engagement_id=state.get("run_id"),
-                )
-                log.append(
-                    f"[push] RETRY phase={phase} sent {len(changes)} "
-                    f"feedback corrections for op={op_id}"
-                )
-            else:
-                log.append(
-                    f"[push] RETRY phase={phase} no corrections to send — "
-                    f"re-running same operation op={op_id}"
-                )
-
-            _log_step(
-                "PUSH",
-                f"→ RETRY feedback={len(changes)} changes  op={op_id}",
-            )
-            # Return minimal update — no new IDs, keep existing asset_map
-            return {
-                "stage_results": list(state.get("stage_results") or []),
-                "retry_same_phase": False,  # consumed
-                "issues_to_fix": [],
-                # Explicitly reset multi-skill tracking so _after_push
-                # routes to analyse_results (not master_plan)
-                "phase_skills": [],
-                "phase_skill_index": 0,
-                # reset planning state so next cycle starts clean
-                "current_plan": None,
-                "current_plan_summary": [],
-                "current_plan_error": None,
-                "master_revision_feedback": "",
-                "evaluator_action": "",
-                "feedback": "",
-                "log": log,
-            }
-
+        # ---- retry handling ------------------------------------------------
+        # A retry (master set retry_same_phase) re-pushes the CORRECTED plan as a
+        # fresh operation rather than patching the prior operation's stages via
+        # /ai/operation-feedback. The old feedback path could not map a reshaped
+        # retry plan back onto the original stage_ids (it silently sent zero
+        # corrections); re-pushing a clean operation always applies the fix. The
+        # `retry_same_phase` / `issues_to_fix` flags are consumed in the
+        # phase-complete return below.
         push: PushResult = push_specialist(
             state,
             plan=plan,
@@ -1311,6 +1218,9 @@ def _make_push_node(
             "phase_history": history,
             "phase_asset_map": phase_asset_map,
             "pending_operation_id": None,  # populated by analyse_results from backend result
+            # retry flags consumed: the corrected plan was just pushed as a new op
+            "retry_same_phase": False,
+            "issues_to_fix": [],
             # reset all multi-skill tracking so next phase starts clean
             "phase_skills": [],
             "phase_skill_index": 0,

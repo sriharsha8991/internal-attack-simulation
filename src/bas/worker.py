@@ -296,13 +296,24 @@ def _current_phase_adversary(engagement_id: str) -> tuple[str | None, str | None
         return None, None
 
 
-def _discover_operation_id(bas: Any, adversary_id: str) -> str | None:
-    """Find the backend operation auto-created for our adversary via GET /operations."""
+def _discover_operation_id(
+    bas: Any, adversary_id: str, engagement_id: str | None = None
+) -> str | None:
+    """Find the backend operation for our adversary via GET /operations.
+
+    Matches on the nested ``adversary.adversary_id``. When ``engagement_id`` is
+    known it is used to refine/disambiguate (operations and adversaries both
+    carry an ``engagement_id``), comparing dash-insensitively since our run_id is
+    32-char hex while the backend may use the dashed UUID form.
+    """
     try:
         ops = bas.operations.list()
     except Exception as exc:  # noqa: BLE001
         logger.warning("[poller] GET /operations failed: %s", exc)
         return None
+
+    def _norm(s: Any) -> str:
+        return str(s or "").replace("-", "")
 
     def _adv(o: dict) -> str:
         # OperationSummary nests the adversary: {"adversary": {"adversary_id": ...}}.
@@ -312,10 +323,24 @@ def _discover_operation_id(bas: Any, adversary_id: str) -> str | None:
             return str(adv["adversary_id"])
         return str(o.get("adversary_id") or o.get("adversaryId") or "")
 
+    def _eng(o: dict) -> str:
+        adv = o.get("adversary") if isinstance(o.get("adversary"), dict) else {}
+        return _norm(o.get("engagement_id") or adv.get("engagement_id"))
+
     def _opid(o: dict) -> str | None:
         return o.get("operation_id") or o.get("id") or o.get("operationId")
 
+    eng = _norm(engagement_id)
     candidates = [o for o in ops if isinstance(o, dict) and _adv(o) == str(adversary_id)]
+    if eng:
+        if candidates:
+            # Among adversary matches, prefer ones that also match the engagement.
+            refined = [o for o in candidates if _eng(o) == eng]
+            if refined:
+                candidates = refined
+        else:
+            # No adversary match (e.g. list lags) — fall back to engagement match.
+            candidates = [o for o in ops if isinstance(o, dict) and _eng(o) == eng]
     if not candidates:
         return None
     # Most recent first (started_at, falling back to completed_at).
@@ -368,7 +393,7 @@ def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
                 return  # resumed by webhook / scanner / completed — done
 
             if op_id is None and adversary_id:
-                op_id = _discover_operation_id(bas, adversary_id)
+                op_id = _discover_operation_id(bas, adversary_id, engagement_id)
                 if op_id:
                     logger.info("[poller] %s discovered op=%s", engagement_id, op_id)
 
