@@ -167,9 +167,26 @@ def _build_checkpointer(cfg: AppConfig) -> Any:
             # check_same_thread=False: the worker may resume an engagement from a
             # different thread than the one that created the checkpoint.
             conn = sqlite3.connect(str(db_path), check_same_thread=False)
-            return SqliteSaver(conn)
+            return SqliteSaver(conn, serde=_build_serde())
     from langgraph.checkpoint.memory import MemorySaver
     return MemorySaver()
+
+
+def _build_serde() -> Any:
+    """Checkpoint serializer with our custom state types registered.
+
+    LangGraph's msgpack serde warns on (and will soon BLOCK) deserialization of
+    types it doesn't recognise. ``StageResult`` is the only custom pydantic model
+    stored as an instance in SessionState (everything else is ``model_dump()``-ed
+    to plain dicts), but we register ``PhaseRecord`` too as a defensive measure
+    against any future code path that forgets to dump it. Registering an explicit
+    allowlist also opts us into the future strict behaviour safely.
+    """
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from .orchestrator.state import PhaseRecord, StageResult
+
+    return JsonPlusSerializer(allowed_msgpack_modules=[StageResult, PhaseRecord])
 
 
 def _get_compiled_graph():

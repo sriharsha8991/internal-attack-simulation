@@ -8,6 +8,8 @@ without standing up the whole LangGraph runtime.
 
 from __future__ import annotations
 
+import bas.orchestrator.graph as graph_mod
+from bas.orchestrator.graph import _make_analyse_results_node
 from bas.orchestrator.memory import (
     DEFAULT_PROMPT_NARRATIVES,
     CampaignMemory,
@@ -165,3 +167,39 @@ def test_memory_survives_across_phases():
         "found gateway",
     ]
     assert not any(k.startswith("pending.") for k in state["memory"])
+
+
+# ---- analyse_results timeout-resume path (regression) ----------------------
+
+
+def test_analyse_results_timeout_path_clears_pending(monkeypatch):
+    """The timeout-resume branch must clear pending.* and signal retry without
+    raising. Regression for the NameError introduced when the inline pending-key
+    loop was replaced by CampaignMemory.clear_pending() but a log line still
+    referenced the removed `pending_keys` local.
+    """
+    # interrupt() returns the resume value; simulate a timeout resume.
+    monkeypatch.setattr(graph_mod, "interrupt", lambda _: {"timeout": True})
+
+    node = _make_analyse_results_node(master=object())  # master unused on timeout
+    state = {
+        "current_phase": "discovery",
+        "results_dir": None,  # _persist_memory no-ops, no disk I/O
+        "memory": {
+            "network": {"cidr": "10.0.0.0/24"},
+            "pending.discovery.nmap_scan": "awaiting_results",
+            "pending.discovery.ad_enum": "awaiting_results",
+        },
+        "phase_history": [],
+        "log": [],
+    }
+
+    out = node(state)  # must not raise
+
+    assert out["retry_same_phase"] is True
+    assert out["pending_operation_id"] is None
+    # pending.* keys cleared, real facts preserved
+    assert not any(k.startswith("pending.") for k in out["memory"])
+    assert out["memory"]["network"] == {"cidr": "10.0.0.0/24"}
+    # the log line that previously raised NameError now reports the count
+    assert any("cleared 2 pending keys" in line for line in out["log"])
