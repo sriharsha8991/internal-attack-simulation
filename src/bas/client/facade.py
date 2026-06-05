@@ -41,6 +41,7 @@ from .adversaries import AdversariesApi
 from .agents import AgentsApi
 from .environments import EnvironmentsApi
 from .feedback import FeedbackApi
+from .operations import OperationsApi
 from .payloads import PayloadsApi
 from .transport import HttpTransport
 
@@ -71,6 +72,7 @@ class BasClient:
         self.abilities = AbilitiesApi(self._transport, dry_run=dry_run)
         self.adversaries = AdversariesApi(self._transport, dry_run=dry_run)
         self.feedback = FeedbackApi(self._transport, dry_run=dry_run)
+        self.operations = OperationsApi(self._transport, dry_run=dry_run)
 
     # ---- alternative constructors ------------------------------------------
 
