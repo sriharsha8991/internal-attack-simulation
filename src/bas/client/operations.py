@@ -79,7 +79,8 @@ class OperationsApi:
     def get_detail(self, operation_id: str) -> dict[str, Any]:
         """GET /operations/{id} — full operation snapshot with execution logs."""
         if self._dry:
-            return {"operation": {"operation_id": operation_id, "status": "completed"}}
+            # Mirror the real OperationDetail shape (top-level status).
+            return {"operation_id": operation_id, "status": "completed", "execution_logs": []}
         return self._t.get_json(f"/operations/{operation_id}")
 
     def get_abilities_payloads(self, operation_id: str) -> Any:

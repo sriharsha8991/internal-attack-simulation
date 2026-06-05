@@ -305,6 +305,11 @@ def _discover_operation_id(bas: Any, adversary_id: str) -> str | None:
         return None
 
     def _adv(o: dict) -> str:
+        # OperationSummary nests the adversary: {"adversary": {"adversary_id": ...}}.
+        # Fall back to a flat field for forward-compat.
+        adv = o.get("adversary")
+        if isinstance(adv, dict) and adv.get("adversary_id"):
+            return str(adv["adversary_id"])
         return str(o.get("adversary_id") or o.get("adversaryId") or "")
 
     def _opid(o: dict) -> str | None:
@@ -313,9 +318,9 @@ def _discover_operation_id(bas: Any, adversary_id: str) -> str | None:
     candidates = [o for o in ops if isinstance(o, dict) and _adv(o) == str(adversary_id)]
     if not candidates:
         return None
-    # Most recent first.
+    # Most recent first (started_at, falling back to completed_at).
     candidates.sort(
-        key=lambda o: str(o.get("created_at") or o.get("started_at") or ""),
+        key=lambda o: str(o.get("started_at") or o.get("completed_at") or ""),
         reverse=True,
     )
     return _opid(candidates[0])

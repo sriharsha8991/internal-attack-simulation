@@ -129,10 +129,11 @@ class _FakeBas:
 def test_discover_operation_id_matches_adversary_and_picks_latest():
     from bas.worker import _discover_operation_id
 
+    # Real OperationSummary shape: adversary is a nested object.
     bas = _FakeBas([
-        {"operation_id": "old", "adversary_id": "ADV", "created_at": "2026-01-01T00:00:00"},
-        {"operation_id": "new", "adversary_id": "ADV", "created_at": "2026-06-01T00:00:00"},
-        {"operation_id": "other", "adversary_id": "ZZZ", "created_at": "2026-06-02T00:00:00"},
+        {"operation_id": "old", "adversary": {"adversary_id": "ADV"}, "started_at": "2026-01-01T00:00:00"},
+        {"operation_id": "new", "adversary": {"adversary_id": "ADV"}, "started_at": "2026-06-01T00:00:00"},
+        {"operation_id": "other", "adversary": {"adversary_id": "ZZZ"}, "started_at": "2026-06-02T00:00:00"},
     ])
     assert _discover_operation_id(bas, "ADV") == "new"  # latest matching adversary
 
@@ -140,12 +141,59 @@ def test_discover_operation_id_matches_adversary_and_picks_latest():
 def test_discover_operation_id_none_when_no_match():
     from bas.worker import _discover_operation_id
 
-    bas = _FakeBas([{"operation_id": "x", "adversary_id": "OTHER"}])
+    bas = _FakeBas([{"operation_id": "x", "adversary": {"adversary_id": "OTHER"}}])
     assert _discover_operation_id(bas, "ADV") is None
 
 
-def test_discover_operation_id_handles_camelcase_fields():
+def test_discover_operation_id_flat_adversary_fallback():
     from bas.worker import _discover_operation_id
 
-    bas = _FakeBas([{"operationId": "camel", "adversaryId": "ADV"}])
-    assert _discover_operation_id(bas, "ADV") == "camel"
+    # Forward-compat: a flat adversary_id field still resolves.
+    bas = _FakeBas([{"operation_id": "flat", "adversary_id": "ADV"}])
+    assert _discover_operation_id(bas, "ADV") == "flat"
+
+
+def test_adapt_operation_detail_builds_stages_from_logs():
+    """A detail payload (no `abilities`, only execution_logs) parses into
+    per-stage results with stdout/exit_code preserved."""
+    from bas.results import parse_operation_result
+
+    detail = {
+        "operation_id": "op-1",
+        "name": "discovery-op",
+        "status": "completed",
+        "engagement_id": "eng-1",
+        "adversary": {"adversary_id": "ADV"},
+        "progress": {"total_abilities": 1, "completed_abilities": 1, "progress_percent": 100},
+        "execution_logs": [
+            {
+                "ability_id": "ab-1",
+                "stage_id": "st-1",
+                "command_executed": "whoami",
+                "stdout": "root\n",
+                "stderr": "",
+                "exit_code": 0,
+                "executor": "sh",
+                "timestamp": "2026-06-05T00:00:00",
+            },
+            {
+                "ability_id": "ab-1",
+                "stage_id": "st-2",
+                "command_executed": "nmap -sV 10.0.0.0/24",
+                "stdout": "",
+                "stderr": "nmap: command not found",
+                "exit_code": 127,
+                "executor": "sh",
+                "timestamp": "2026-06-05T00:01:00",
+            },
+        ],
+    }
+    result = parse_operation_result(detail)
+    assert result.operation_id == "op-1"
+    assert len(result.abilities) == 1
+    stages = result.abilities[0].stages
+    assert len(stages) == 2
+    passed = {s.command_executed: s.execution_status for s in stages}
+    assert passed["whoami"] == "passed"
+    assert passed["nmap -sV 10.0.0.0/24"] == "failed"
+    assert stages[0].stdout == "root\n"

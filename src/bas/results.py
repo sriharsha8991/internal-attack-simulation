@@ -134,10 +134,64 @@ _CROSS_VAR_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 
+def _adapt_operation_detail(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a ``GET /operations/{id}`` detail payload to the webhook shape.
+
+    The webhook (``OperationResultRequest``) nests metadata under ``operation``
+    and carries ``abilities`` (stage *definitions*) alongside ``execution_logs``.
+    The operations-detail endpoint instead puts ``operation_id``/``status`` at the
+    top level and ships ONLY ``execution_logs`` (no ``abilities``). When we detect
+    that shape, synthesise the ``operation`` wrapper and rebuild ``abilities`` from
+    the logs so :func:`parse_operation_result` works unchanged. Webhook payloads
+    (which already have ``operation``/``abilities``) pass through untouched.
+    """
+    if raw.get("operation") and raw.get("abilities"):
+        return raw  # already the webhook shape
+    logs = raw.get("execution_logs")
+    if not logs or raw.get("abilities"):
+        return raw  # nothing to synthesise from / definitions already present
+
+    # Group logs by ability_id; each distinct stage_id becomes a stage. The
+    # command_template is taken from the executed command so detect_issues and
+    # the structural summary still see the command text.
+    by_ability: dict[str, list[dict[str, Any]]] = {}
+    for log in logs:
+        by_ability.setdefault(str(log.get("ability_id") or ""), []).append(log)
+
+    abilities: list[dict[str, Any]] = []
+    for ab_id, ab_logs in by_ability.items():
+        stages = [
+            {
+                "stage_id": str(lg.get("stage_id") or ""),
+                "stage_name": str(lg.get("stage_id") or ""),
+                "executor": lg.get("executor") or "",
+                "command_template": lg.get("command_executed") or "",
+            }
+            for lg in ab_logs
+        ]
+        abilities.append({"ability_id": ab_id, "name": ab_id, "stages": stages})
+
+    return {
+        **raw,
+        "operation": {
+            "operation_id": raw.get("operation_id"),
+            "name": raw.get("name"),
+            "status": raw.get("status"),
+            "started_at": raw.get("started_at"),
+            "completed_at": raw.get("completed_at"),
+            "kill_switch_triggered": raw.get("kill_switch_triggered"),
+        },
+        "abilities": abilities,
+        "execution_logs": logs,
+    }
+
+
 def parse_operation_result(raw: dict[str, Any]) -> OperationResult:
     """Validate and parse raw backend JSON into a typed model.
 
-    The backend sends a rich snapshot with:
+    Accepts both the ``/results`` webhook payload and the ``GET /operations/{id}``
+    detail payload (the latter is normalised by :func:`_adapt_operation_detail`).
+
     - ``operation``: nested metadata (operation_id, status, completed_at, ...)
     - ``abilities``: stage definitions (stage_id, command_template, ...)
     - ``execution_logs``: actual output (stdout, stderr, exit_code, ...)
@@ -146,6 +200,7 @@ def parse_operation_result(raw: dict[str, Any]) -> OperationResult:
     (ability_id, stage_id) so downstream code sees a single unified model
     with stdout/stderr on each stage.
     """
+    raw = _adapt_operation_detail(raw)
     # Handle the nested operation structure from the backend.
     op_info = raw.get("operation") or {}
     operation_id = op_info.get("operation_id") or raw.get("operation_id", "")
