@@ -138,7 +138,7 @@ class RunConfig(StrictModel):
 class ExecutionConfig(StrictModel):
     """Controls graph checkpointing and result-wait behaviour."""
 
-    result_wait_timeout: int = Field(default=600, ge=0, description="Seconds before timeout-resume fires.")
+    result_wait_timeout: int = Field(default=6000, ge=0, description="Seconds before timeout-resume fires. Generous by default — backend commands can run long.")
     max_result_size_mb: int = Field(default=10, ge=1)
     # Default to sqlite so engagements paused at `interrupt("awaiting_results")`
     # survive a process restart. The in-memory saver orphans any paused run.

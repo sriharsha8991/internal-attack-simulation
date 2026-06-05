@@ -35,7 +35,7 @@ run:
   log_level: ${LOG_LEVEL:-INFO}
 
 execution:
-  result_wait_timeout: 4000              # seconds before timeout-resume fires
+  result_wait_timeout: 6000              # seconds before timeout-resume fires (100 min — long-running commands)
   max_result_size_mb: 10
-  checkpointer: memory                   # memory | sqlite
+  checkpointer: sqlite                   # memory | sqlite — sqlite survives restarts (paused engagements)
   checkpoint_db: runs/checkpoints.db     # only used when checkpointer=sqlite
