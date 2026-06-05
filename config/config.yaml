@@ -35,7 +35,8 @@ run:
   log_level: ${LOG_LEVEL:-INFO}
 
 execution:
-  result_wait_timeout: 6000              # seconds before timeout-resume fires (100 min — long-running commands)
+  result_wait_timeout: 6000              # soft window (100 min): past this it's "overdue" but stays parked — late results still resume it
+  result_hard_timeout: 12000             # hard cap (200 min): force-abandon a still-waiting engagement (dead-agent backstop). 0 = never
   max_result_size_mb: 10
   checkpointer: sqlite                   # memory | sqlite — sqlite survives restarts (paused engagements)
   checkpoint_db: runs/checkpoints.db     # only used when checkpointer=sqlite

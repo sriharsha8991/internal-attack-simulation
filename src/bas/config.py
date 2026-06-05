@@ -138,7 +138,8 @@ class RunConfig(StrictModel):
 class ExecutionConfig(StrictModel):
     """Controls graph checkpointing and result-wait behaviour."""
 
-    result_wait_timeout: int = Field(default=6000, ge=0, description="Seconds before timeout-resume fires. Generous by default — backend commands can run long.")
+    result_wait_timeout: int = Field(default=6000, ge=0, description="Soft wait window (s). Past this an engagement is 'overdue' but stays parked — late results still resume it. Backend commands can run long.")
+    result_hard_timeout: int = Field(default=0, ge=0, description="Hard cap (s) after which the scanner force-abandons a still-waiting engagement (dead-agent backstop). 0 = no hard cap (wait indefinitely for results / manual cancel). Should be > result_wait_timeout.")
     max_result_size_mb: int = Field(default=10, ge=1)
     # Default to sqlite so engagements paused at `interrupt("awaiting_results")`
     # survive a process restart. The in-memory saver orphans any paused run.

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
+from datetime import datetime, timezone
 from typing import Any
 
 from .bootstrap import (
@@ -41,6 +42,142 @@ def _get_engagement_lock(engagement_id: str) -> threading.Lock:
             lock = threading.Lock()
             _engagement_locks[engagement_id] = lock
         return lock
+
+
+# ---------------------------------------------------------------------------
+# Timeout scanner — two-tier (soft = recoverable, hard = abandon)
+#
+# Lives here (not in api.py) because it is engagement business logic: it shares
+# the per-engagement lock and the compiled graph with the webhook-resume path.
+# api.py only wires it into the startup hook.
+# ---------------------------------------------------------------------------
+
+# Engagements we've already logged an "overdue" warning for (soft timeout
+# passed but still parked). Keyed by (engagement_id, awaiting_since) so a fresh
+# wait after a resume warns again. Cleaned up on hard-abandon.
+_overdue_warned: set[tuple[str, str]] = set()
+
+
+def _start_timeout_scanner(soft_timeout: int, hard_timeout: int) -> None:
+    """Periodically handle engagements stuck in awaiting_results.
+
+    Two tiers:
+      * soft_timeout  — past this the engagement is 'overdue'; we keep it parked
+        so a late result still resumes it (work is never wasted).
+      * hard_timeout  — only past this do we force the timeout-resume (advance/
+        retry), the backstop for genuinely dead agents. 0 disables it.
+    """
+    import time
+
+    def _scan() -> None:
+        while True:
+            time.sleep(60)  # check every minute
+            try:
+                _expire_stale_engagements(soft_timeout, hard_timeout)
+            except Exception:  # noqa: BLE001
+                logger.exception("[timeout-scanner] error during scan")
+
+    t = threading.Thread(target=_scan, daemon=True, name="timeout-scanner")
+    t.start()
+    logger.info(
+        "[boot] timeout scanner started (soft=%ds, hard=%s)",
+        soft_timeout,
+        f"{hard_timeout}s" if hard_timeout else "disabled",
+    )
+
+
+def _expire_stale_engagements(soft_timeout: int, hard_timeout: int) -> None:
+    """Force-resume only engagements past the HARD cap; keep overdue ones parked.
+
+    Between the soft and hard timeouts the engagement stays in awaiting_results
+    with its checkpoint and pending_operation_id intact, so a late result POSTed
+    to /results resumes it normally instead of being discarded.
+    """
+    from langgraph.types import Command
+
+    store: RunStore = _state["store"]
+    compiled = _get_compiled_graph()
+    now = datetime.now(timezone.utc)
+
+    for record in store.list_all():
+        if record.get("status") != "awaiting_results":
+            continue
+        awaiting_since = record.get("awaiting_since")
+        if not awaiting_since:
+            continue
+        elapsed = (now - datetime.fromisoformat(awaiting_since)).total_seconds()
+
+        engagement_id = record["run_id"]
+
+        # Within the recoverable window (under hard cap, or hard cap disabled):
+        # leave it parked so a late result still resumes it. Warn once if overdue.
+        if not hard_timeout or elapsed <= hard_timeout:
+            if elapsed > soft_timeout:
+                warn_key = (engagement_id, str(awaiting_since))
+                if warn_key not in _overdue_warned:
+                    _overdue_warned.add(warn_key)
+                    logger.warning(
+                        "[timeout-scanner] engagement %s overdue (%ds > soft %ds) "
+                        "— still parked, will honour a late result%s",
+                        engagement_id,
+                        int(elapsed),
+                        soft_timeout,
+                        f" until hard cap {hard_timeout}s" if hard_timeout else "",
+                    )
+            continue
+
+        # Past the hard cap: force-abandon — dead-agent backstop.
+        _overdue_warned.discard((engagement_id, str(awaiting_since)))
+        logger.warning(
+            "[timeout-scanner] hard-expiring engagement %s after %ds (hard cap %ds)",
+            engagement_id,
+            int(elapsed),
+            hard_timeout,
+        )
+
+        # Acquire per-engagement lock to prevent racing with _resume_graph.
+        lock = _get_engagement_lock(engagement_id)
+        if not lock.acquire(timeout=10):
+            logger.info(
+                "[timeout-scanner] engagement %s locked by resume; skipping this cycle",
+                engagement_id,
+            )
+            continue
+
+        try:
+            # Re-read under lock — a webhook resume may have already changed status.
+            fresh = store.get(engagement_id)
+            if not fresh or fresh.get("status") != "awaiting_results":
+                continue
+
+            from langgraph.errors import GraphInterrupt
+
+            fresh["status"] = "running"
+            fresh.pop("awaiting_since", None)
+            store.save(fresh)
+
+            compiled.invoke(
+                Command(resume={"timeout": True, "engagement_id": engagement_id}),
+                config={"configurable": {"thread_id": engagement_id}},
+            )
+            fresh["status"] = "completed"
+            fresh["finished_at"] = now_iso()
+            store.save(fresh)
+        except GraphInterrupt:
+            fresh["status"] = "awaiting_results"
+            fresh["awaiting_since"] = now_iso()
+            store.save(fresh)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[timeout-scanner] failed to resume engagement %s",
+                engagement_id,
+            )
+            fresh["status"] = "failed"
+            fresh["error"] = "timeout-scanner resume failed"
+            fresh["finished_at"] = now_iso()
+            store.save(fresh)
+        finally:
+            lock.release()
 
 
 def _release_engagement_lock(engagement_id: str) -> None:
