@@ -1378,7 +1378,9 @@ def _make_analyse_results_node(master: MasterPolicy):
             phase = state.get("current_phase") or ""
 
             # Clear pending.* keys — they can't be verified without results
-            new_memory = CampaignMemory.from_state(state).clear_pending().data
+            _mem = CampaignMemory.from_state(state)
+            cleared_pending = len(_mem.pending_keys())
+            new_memory = _mem.clear_pending().data
 
             # Set execution_summary so master_plan sees timeout context
             timeout_summary = (
@@ -1402,7 +1404,7 @@ def _make_analyse_results_node(master: MasterPolicy):
                 history[-1] = last
 
             log.append(
-                f"[analyse_results] TIMEOUT — cleared {len(pending_keys)} "
+                f"[analyse_results] TIMEOUT — cleared {cleared_pending} "
                 f"pending keys, signalling retry for phase={phase}"
             )
             _log_step(
