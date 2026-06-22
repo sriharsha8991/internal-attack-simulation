@@ -141,12 +141,21 @@ class ExecutionConfig(StrictModel):
     result_wait_timeout: int = Field(default=6000, ge=0, description="Soft wait window (s). Past this an engagement is 'overdue' but stays parked — late results still resume it. Backend commands can run long.")
     result_hard_timeout: int = Field(default=0, ge=0, description="Hard cap (s) after which the scanner force-abandons a still-waiting engagement (dead-agent backstop). 0 = no hard cap (wait indefinitely for results / manual cancel). Should be > result_wait_timeout.")
     result_poll_enabled: bool = Field(default=True, description="Pull results by polling GET /operations/{id} instead of only waiting for the /results webhook.")
-    result_poll_interval: int = Field(default=420, ge=30, description="Seconds between operation-detail polls (default 7 min).")
+    result_poll_interval: int = Field(default=40, ge=30, description="Seconds between operation-detail polls (default 7 min).")
     max_result_size_mb: int = Field(default=10, ge=1)
     # Default to sqlite so engagements paused at `interrupt("awaiting_results")`
     # survive a process restart. The in-memory saver orphans any paused run.
     checkpointer: Literal["memory", "sqlite"] = "sqlite"
     checkpoint_db: str = "runs/checkpoints.db"
+
+
+class KaliConfig(StrictModel):
+    """Connection settings for the Kali toolbox sidecar."""
+
+    base_url: str = "http://kali-toolbox:9000"
+    timeout: float = Field(default=300.0, gt=0)
+    connect_timeout: float = Field(default=10.0, gt=0)
+    enabled: bool = False
 
 
 # ----------------------------------------------------------------------------
@@ -159,6 +168,7 @@ class AppConfig(StrictModel):
     llm: LlmConfig = Field(default_factory=LlmConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    kali: KaliConfig = Field(default_factory=KaliConfig)
 
     # Source path (debug/auditing). Excluded from `extra=forbid` because it's set
     # post-construction via `model_copy(update=...)`.

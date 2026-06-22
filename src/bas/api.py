@@ -76,11 +76,15 @@ def _startup() -> None:
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
-    """Gracefully close the process-global BasClient (httpx connection pool)."""
+    """Gracefully close process-global HTTP clients."""
     bas = _state.get("bas")
     if bas is not None:
         bas.close()
         logger.info("[shutdown] BasClient closed")
+    kali = _state.get("kali")
+    if kali is not None:
+        kali.close()
+        logger.info("[shutdown] KaliClient closed")
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ from ..models import AdversaryCreate, GeneratedAbility
 from ..persistence import ArtifactStore
 from ..skills import Skill
 from ..tools.skill_tool import SkillTool
+from .payload_catalog import PayloadCatalog
 from .prompt_profiles import PromptProfile, get_profile
 
 if TYPE_CHECKING:
@@ -103,9 +104,11 @@ class LLMPlanner:
         *,
         temperature: float = 0.2,
         profile_resolver=None,
+        catalog: PayloadCatalog | None = None,
     ) -> None:
         self._llm = llm
         self._temperature = temperature
+        self._catalog = catalog
         # Hook lets callers override the skill -> profile mapping for tests.
         self._profile_resolver = profile_resolver or (
             lambda skill: get_profile(getattr(skill.frontmatter, "stage", None))
@@ -200,30 +203,15 @@ class LLMPlanner:
         # grounding="skip".
         research_block = ""
 
-        # Phase-specific research — ONLY on retry / when prior commands were
-        # blocked or feedback mentions evasion.  First clean attempt relies on
-        # the skill playbook + model knowledge (saves a grounded call).
+        # Phase-specific research — always performed when a phase query exists.
+        # The prior classifier-gated approach almost never triggered research on
+        # first pass, leaving agents with stale knowledge. One grounded call per
+        # phase is cheap compared to a failed phase due to outdated TTPs.
         phase_stage = getattr(skill.frontmatter, "stage", None) or ""
         issues_to_fix = state.get("issues_to_fix") or []
         is_retry = bool(feedback) or bool(issues_to_fix)
         phase_query = self._PHASE_RESEARCH_QUERIES.get(phase_stage.lower())
-        # Research the phase's current TTPs when (a) this is a retry/blocked, or
-        # (b) on a FIRST pass the cheap grounding classifier judges that fresh
-        # web evidence would materially help. (b) lets the planner "go beyond the
-        # skill" with up-to-date tradecraft instead of relying only on baked-in
-        # knowledge. classify_grounding_depth is ungrounded (no budget cost); the
-        # research() call below is the only grounded one and still fails closed
-        # on the per-run grounded-call budget.
-        needs_phase_research = False
-        if phase_query:
-            if is_retry:
-                needs_phase_research = True
-            else:
-                try:
-                    depth = self._llm.classify_grounding_depth(phase_query)
-                    needs_phase_research = depth in ("light", "deep")
-                except Exception as exc:  # noqa: BLE001 - classify is best-effort
-                    logger.warning("[plan] grounding classify failed: %s", exc)
+        needs_phase_research = bool(phase_query)
         if needs_phase_research and phase_query:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
             phase_query_full = (
@@ -244,23 +232,36 @@ class LLMPlanner:
                 if rr.citations:
                     research_block += "\nSources: " + ", ".join(rr.citations[:6])
 
-        # Install/download-keyword research — tool acquisition help
-        if feedback and any(
+        # Tool acquisition research — triggers on retry when feedback mentions
+        # install keywords, AND proactively on first pass when the skill's
+        # tool_allowlist contains tools (likely non-native and need sourcing).
+        tool_allowlist = skill.frontmatter.tool_allowlist or []
+        _feedback_has_install_hint = feedback and any(
             kw in feedback.lower() for kw in self._INSTALL_KEYWORDS
-        ):
+        )
+        _first_pass_with_tools = not is_retry and bool(tool_allowlist)
+        if _feedback_has_install_hint or _first_pass_with_tools:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
-            tool_allow = ", ".join(skill.frontmatter.tool_allowlist or []) or "(none listed)"
+            tool_allow = ", ".join(tool_allowlist) or "(none listed)"
+            if feedback:
+                context_line = f"Feedback that triggered this: {feedback[:500]}"
+            else:
+                context_line = (
+                    "First-pass planning: proactively researching best tool "
+                    "usage, deployment methods, and native alternatives."
+                )
             query = (
                 "Red-team tool acquisition research.\n"
                 f"Foothold platform: {platform}.\n"
                 f"Skill tool allowlist: {tool_allow}.\n"
-                f"Feedback that triggered this: {feedback[:500]}\n\n"
+                f"{context_line}\n\n"
                 "Find the CURRENT best way to obtain and deploy the needed "
                 "tool(s) on this platform. Consider:\n"
                 "  - Latest working download sources\n"
                 "  - Package manager availability\n"
                 "  - In-memory execution alternatives\n"
                 "  - Native OS commands that achieve the same goal\n"
+                "  - Whether each tool is already built into the OS\n"
                 "Provide actionable results. No hardcoded assumptions."
             )
             try:
@@ -276,32 +277,41 @@ class LLMPlanner:
                 if rr.citations:
                     research_block += "\nCitations: " + ", ".join(rr.citations[:6])
 
-        # Blocked-command research — if prior attempt was blocked by security
-        blocked_hints = [i for i in issues_to_fix if "block" in i.lower() or "evas" in i.lower()]
-        if blocked_hints:
+        # Research — if prior attempt had issues (blocked, syntax, logic error, etc)
+        if issues_to_fix:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
             block_query = (
-                f"Red team command evasion for {platform} when EDR/AV blocks commands. "
-                f"Specific issues: {'; '.join(blocked_hints[:3])}. "
-                f"Provide alternative LOLBin commands, encoded execution, "
-                f"or AMSI bypass techniques that achieve the same goal."
+                f"Red team command syntax, execution and evasion for {platform}. "
+                f"Specific issues from previous run: {'; '.join(issues_to_fix[:3])}. "
+                f"Provide correct LOLBin commands, encoded execution, or fixes "
+                f"that achieve the goal without timing out or failing."
             )
             try:
                 rr = self._llm.research(block_query, depth="light")
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[plan] evasion research failed: %s", exc)
+                logger.warning("[plan] research failed: %s", exc)
                 rr = None
             if rr and rr.text:
                 research_block += (
-                    "\n\n--- EVASION RESEARCH (anti-blocking) ---\n"
+                    "\n\n--- RESEARCH (anti-blocking & syntax fixes) ---\n"
                     + rr.text.strip()
                 )
                 if rr.citations:
                     research_block += "\nSources: " + ", ".join(rr.citations[:6])
 
+        # Payload catalog block — list pre-uploaded binaries the on-target agent
+        # can fetch. The LLM may set `payload_id` on a stage to reference one.
+        payloads_block = ""
+        if self._catalog is not None:
+            platform_for_payloads = (state.get("foothold") or {}).get("platform")
+            payloads_block = self._catalog.render_planner_block(
+                phase_stage, platform_for_payloads
+            )
+
         system = (
             f"{profile.specialist_system}\n\n--- SKILL PLAYBOOK ---\n{skill_md}"
             + research_block
+            + payloads_block
         )
         user_payload = {
             "foothold": state.get("foothold", {}),
@@ -567,11 +577,32 @@ def push_specialist(
     bas: BasClient,
     artifacts: ArtifactStore | None = None,
     provider_id: str | None = None,
+    catalog: PayloadCatalog | None = None,
 ) -> PushResult:
     """Push an already-approved `SpecialistPlan` to BAS and write artifacts."""
     skill_name = state.get("next_stage") or ""
     if not skill_name or skill_name == "DONE" or not skill_tool.has(skill_name):
         return PushResult(skill=skill_name, success=False, error="no skill to push")
+
+    # Defense in depth against an LLM that emits a syntactically-valid UUID
+    # that doesn't actually exist in the backend's payload catalog. Pydantic
+    # only validates UUID *format*, not membership. Drop unknown IDs to null
+    # rather than failing the push.
+    if catalog is not None:
+        known = catalog.known_ids()
+        if known:  # only filter when we actually have a catalog to compare against
+            for gen in plan.abilities:
+                for stage in gen.stages:
+                    if stage.payload_id is None:
+                        continue
+                    if str(stage.payload_id) not in known:
+                        logger.warning(
+                            "[push] dropping unknown payload_id %s on stage %s "
+                            "(not in backend catalog)",
+                            stage.payload_id,
+                            stage.stage_name,
+                        )
+                        stage.payload_id = None
 
     # ---- 1b. Shell-native syntax validation (pre-push gate) -----------------
     # Parse every command_template through the real shell parser to catch

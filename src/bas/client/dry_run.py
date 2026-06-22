@@ -56,7 +56,7 @@ def fake_environments() -> list[EnvironmentResponse]:
     ]
 
 
-def fake_agents() -> list[AgentResponse]:
+def fake_agents(env_id: UUID | None) -> list[AgentResponse]:
     return [
         AgentResponse(
             agent_id="dry-agent-linux",

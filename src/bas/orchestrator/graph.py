@@ -981,6 +981,7 @@ def _make_push_node(
     skill_tool: SkillTool,
     bas: BasClient,
     artifacts: ArtifactStore | None,
+    planner: Planner | None = None,
 ):
     """Push the committed plan and update master memory."""
 
@@ -1050,6 +1051,7 @@ def _make_push_node(
             bas=bas,
             artifacts=artifacts,
             provider_id=state.get("current_provider_id"),
+            catalog=getattr(planner, "_catalog", None),
         )
 
         results = list(state.get("stage_results") or [])
@@ -1248,18 +1250,39 @@ def _derive_phase_done(
 ) -> bool:
     """Decide whether the phase is complete based on execution results.
 
-    Heuristic: phase is done when at least one ability passed and no critical
-    issues (placeholder tokens, tool-not-found) were detected in passing
-    abilities. Timeout alone doesn't block completion.
+    The phase is done when:
+      1. The operation didn't fail at the infrastructure level.
+      2. At least one ability passed.
+      3. No critical issues (placeholder tokens, tool-not-found, parse errors).
+      4. A majority of abilities passed — a single passing ability amid
+         mostly-failed ones is not enough to call the phase complete.
     """
     from ..results import IssueKind
+
+    total = len(op_result.abilities)
+    if total == 0:
+        return False
+
+    if op_result.operation_status == "failed":
+        return False
 
     passed_count = sum(1 for a in op_result.abilities if a.passed)
     if passed_count == 0:
         return False
-    critical_kinds = {IssueKind.PLACEHOLDER_TOKEN, IssueKind.TOOL_NOT_FOUND, IssueKind.PSH_PARSE_ERROR}
+
+    critical_kinds = {
+        IssueKind.PLACEHOLDER_TOKEN,
+        IssueKind.TOOL_NOT_FOUND,
+        IssueKind.PSH_PARSE_ERROR,
+    }
     critical_issues = [i for i in issues if i.kind in critical_kinds]
-    return len(critical_issues) == 0
+    if critical_issues:
+        return False
+
+    if total > 1 and passed_count < (total / 2):
+        return False
+
+    return True
 
 
 def _make_analyse_results_node(master: MasterPolicy):
@@ -1424,7 +1447,7 @@ def _make_analyse_results_node(master: MasterPolicy):
             f"issues={[i.kind.value for i in issues]}",
         )
 
-        return {
+        result: dict[str, Any] = {
             "memory": new_memory,
             "phase_history": history,
             "completed_phases": completed_phases if phase_done else state.get("completed_phases"),
@@ -1433,6 +1456,33 @@ def _make_analyse_results_node(master: MasterPolicy):
             "pending_operation_id": None,
             "log": log,
         }
+
+        # When the phase is NOT done and there are detected issues or failed
+        # abilities, signal retry with specific actionable descriptions so the
+        # master and planner know exactly what to fix.
+        if not phase_done:
+            failed_abilities = [a for a in op_result.abilities if a.failed]
+            if issues or failed_abilities:
+                fix_items: list[str] = []
+                for iss in issues:
+                    fix_items.append(
+                        f"[{iss.kind.value}] ability={iss.ability_name!r} "
+                        f"stage={iss.stage_name!r}: {iss.detail}"
+                    )
+                for ab in failed_abilities:
+                    stderr_preview = ""
+                    for st in ab.stages:
+                        if st.exit_code != 0 and st.stderr.strip():
+                            stderr_preview = st.stderr.strip()[:200]
+                            break
+                    fix_items.append(
+                        f"ability={ab.name!r} failed (exit={ab.stages[0].exit_code if ab.stages else -1})"
+                        + (f": {stderr_preview}" if stderr_preview else "")
+                    )
+                result["retry_same_phase"] = True
+                result["issues_to_fix"] = fix_items
+
+        return result
 
     return analyse_results_node
 
@@ -1510,7 +1560,7 @@ def build_graph(
     g.add_node("master_plan", _make_master_plan_node(master, skill_tool))
     g.add_node("plan", _make_plan_node(planner, skill_tool))
     g.add_node("evaluate", _make_evaluate_node(evaluator, skill_tool))
-    g.add_node("push", _make_push_node(master, skill_tool, bas, artifacts))
+    g.add_node("push", _make_push_node(master, skill_tool, bas, artifacts, planner=planner))
     g.add_node("analyse_results", _make_analyse_results_node(master))
 
     g.add_edge(START, "init")

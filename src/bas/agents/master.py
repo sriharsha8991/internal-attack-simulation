@@ -31,6 +31,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMMessage, LLMProvider
+from .payload_catalog import PayloadCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ _MASTER_PLAN_PROMPT = (
     "  Pick exactly ONE phase from `available_phases`. Emit a PhaseBriefing\n"
     "  that the planner will use as its mission statement. Be specific about\n"
     "  what is already known, what is missing, and what constraints apply.\n"
+    "  Make sure to collect and gather the information for a given phase. If not achieved, go for a retry of the same phase with specific instructions on what to fix."
     "\n"
     "  You will receive a `phase_history` array: a structured record of every\n"
     "  previously completed phase. Use it to:\n"
@@ -174,13 +176,14 @@ _MASTER_PLAN_RETRY_CONTEXT = (
     "  `execution_summary` is provided — you are reviewing results from the\n"
     "  phase that just executed. Analyse the summary:\n"
     "    * If critical objectives were NOT met but the cause is fixable\n"
-    "      (tool missing, placeholder token, timeout), set retry_same_phase=true\n"
-    "      and list the specific issues in issues_to_fix.\n"
-    "    * If objectives WERE met, pick the NEXT uncompleted phase from\n"
+    "      (tool missing, placeholder token, timeout, permission denied), set retry_same_phase=true\n"
+    "      and list the specific issues in issues_to_fix. DO NOT advance to the next\n"
+    "      phase if the current phase's main objectives are incomplete.\n"
+    "    * If objectives WERE fully met, pick the NEXT uncompleted phase from\n"
     "      `available_phases` (do NOT set done=true — there are more phases).\n"
     "    * Set done=true ONLY when ALL phases in `available_phases` are in\n"
     "      `completed_phases` and there is genuinely nothing left to do.\n"
-    "    * Never retry the same phase more than 2 times — check phase_history\n"
+    "    * Never retry the same phase more than 3 times — check phase_history\n"
     "      for how many times the current phase appears with execution_outcome.\n"
 )
 
@@ -319,9 +322,16 @@ class LLMMasterRouter:
     """Default master router. Three LLM round-trips per phase (plan, review,
     memory update). Each call uses structured output to keep parsing safe."""
 
-    def __init__(self, llm: LLMProvider, *, temperature: float = 0.1) -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        *,
+        temperature: float = 0.1,
+        catalog: PayloadCatalog | None = None,
+    ) -> None:
         self._llm = llm
         self._temperature = temperature
+        self._catalog = catalog
 
     def plan_phase(
         self,
@@ -347,6 +357,8 @@ class LLMMasterRouter:
         system = _MASTER_PLAN_PROMPT
         if execution_summary:
             system += _MASTER_PLAN_RETRY_CONTEXT
+        if self._catalog is not None:
+            system += self._catalog.render_master_summary()
         msgs = [
             LLMMessage(role="system", content=system),
             LLMMessage(

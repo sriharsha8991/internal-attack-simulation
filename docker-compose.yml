@@ -12,6 +12,8 @@ services:
       - .env
     environment:
       BAS_ENGAGEMENTS_DIR: /data/engagements
+      KALI_BASE_URL: http://kali-toolbox:9000
+      KALI_ENABLED: "true"
       # Override defaults from config.yaml here without rebuilding the image.
       # BAS_BASE_URL: http://pelorushub.online:31763
       # BAS_DRY_RUN: "false"
@@ -22,12 +24,44 @@ services:
       # Hot-reload skills/config without rebuilding (comment out for prod).
       - ./skills:/app/skills:ro
       - ./config:/app/config:ro
+      # Shared volume for zero-copy file exchange with Kali toolbox.
+      - kali-shared:/data/kali-shared
+    networks:
+      - bas-internal
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=2)"]
       interval: 15s
       timeout: 3s
       retries: 3
       start_period: 10s
+    # depends_on:
+    #   kali-toolbox:
+    #     condition: service_healthy
+
+  kali-toolbox:
+    build:
+      context: ./docker/kali
+      dockerfile: Dockerfile
+    image: kali-toolbox:latest
+    container_name: kali-toolbox
+    restart: unless-stopped
+    # Port 9000 is NOT mapped to host — only reachable from bas-internal network.
+    environment:
+      KALI_API_PORT: "9000"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    volumes:
+      - kali-shared:/data/kali-shared
+    networks:
+      - bas-internal
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
 
 # --- M2 placeholders (uncomment when migrating to queue-backed persistence) ---
 #  redis:
@@ -48,6 +82,11 @@ services:
 #    command: ["celery", "-A", "bas.tasks", "worker", "--loglevel=info"]
 #    volumes:
 #      - ./engagements:/data/engagements
-#
-# volumes:
+
+networks:
+  bas-internal:
+    driver: bridge
+
+volumes:
+  kali-shared:
 #   redis-data:

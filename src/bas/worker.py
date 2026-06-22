@@ -399,11 +399,16 @@ def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
     """Poll the operation for this phase until it completes, then resume."""
     import time
 
-    from .client.operations import is_operation_complete
+    from .client.operations import (
+        _progress_percent,
+        _status_of,
+        is_operation_complete,
+    )
 
     bas = _state["bas"]
     store: RunStore = _state["store"]
     op_id: str | None = None
+    tick = 0
     phase, adversary_id = _current_phase_adversary(engagement_id)
     logger.info(
         "[poller] started for %s phase=%s adversary=%s interval=%ds",
@@ -411,6 +416,7 @@ def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
     )
     try:
         while True:
+            tick += 1
             rec = store.get(engagement_id)
             if not rec or rec.get("status") != "awaiting_results":
                 return  # resumed by webhook / scanner / completed — done
@@ -426,10 +432,22 @@ def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
                 except Exception as exc:  # noqa: BLE001
                     detail = None
                     logger.warning("[poller] get_detail op=%s failed: %s", op_id, exc)
+                # Heartbeat: emit one line per poll so the wait is visible and the
+                # operation's live status/progress is diagnosable. Without this the
+                # loop is silent between discovery and completion.
+                if detail is not None:
+                    logger.info(
+                        "[poller] %s tick=%d op=%s status=%s progress=%s%% — still waiting",
+                        engagement_id,
+                        tick,
+                        op_id,
+                        _status_of(detail) or "unknown",
+                        _progress_percent(detail),
+                    )
                 if detail and is_operation_complete(detail):
                     logger.info(
-                        "[poller] %s op=%s complete — resuming with pulled result",
-                        engagement_id, op_id,
+                        "[poller] %s op=%s status=%s complete — resuming with pulled result",
+                        engagement_id, op_id, _status_of(detail) or "complete",
                     )
                     # Persist to the result store BEFORE resuming, exactly like
                     # the /results webhook does — analyse_results reads full stage
@@ -442,6 +460,12 @@ def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
                         _active_pollers.discard(engagement_id)
                     _resume_graph(engagement_id, detail)
                     return
+            else:
+                logger.info(
+                    "[poller] %s tick=%d no operation found yet "
+                    "(adversary=%s) — still searching",
+                    engagement_id, tick, adversary_id,
+                )
 
             time.sleep(interval_s)
     finally:

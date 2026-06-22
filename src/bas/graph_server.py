@@ -21,6 +21,7 @@ from .agents import (
     LLMEvaluator,
     LLMMasterRouter,
     LLMPlanner,
+    PayloadCatalog,
     StaticAcceptEvaluator,
     StaticMasterRouter,
     StaticPlanner,
@@ -47,8 +48,6 @@ def _build_studio_graph():
         cfg = AppConfig.load()
         dry_run = cfg.bas.dry_run
         provider = get_provider(cfg.llm)
-        master = LLMMasterRouter(provider)
-        planner = LLMPlanner(provider)
         evaluator = LLMEvaluator(provider)
         bas = BasClient(
             cfg.bas.base_url,
@@ -56,6 +55,9 @@ def _build_studio_graph():
             timeout=cfg.bas.timeout,
             dry_run=dry_run,
         )
+        catalog = PayloadCatalog.fetch(bas)
+        master = LLMMasterRouter(provider, catalog=catalog)
+        planner = LLMPlanner(provider, catalog=catalog)
         logger.info("[studio] built graph with LLM-backed agents (dry_run=%s)", dry_run)
     except Exception:
         # Fallback: static stubs — Studio can still show the graph topology and
