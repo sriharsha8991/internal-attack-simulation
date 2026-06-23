@@ -83,16 +83,10 @@ RUN pip3 install --break-system-packages --ignore-installed --no-cache-dir \
 RUN mkdir -p /data/kali-shared
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 6 — Entrypoint
-# ─────────────────────────────────────────────────────────────────────────────
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# ─────────────────────────────────────────────────────────────────────────────
 # EXPOSED PORTS
 # ─────────────────────────────────────────────────────────────────────────────
 EXPOSE 9000
 
 WORKDIR /root
 
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uvicorn", "kali_api.main:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "1", "--app-dir", "/opt/kali-api", "--log-level", "info"]

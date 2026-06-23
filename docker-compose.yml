@@ -45,9 +45,9 @@ services:
     image: kali-toolbox:latest
     container_name: kali-toolbox
     restart: unless-stopped
-    # Map port 9000 to the host so you can access/debug the API directly from your host machine
+    # Map port 9500 on the host to port 9000 inside the container to avoid host conflicts (9000 is common)
     ports:
-      - "9000:9000"
+      - "9500:9000"
     environment:
       KALI_API_PORT: "9000"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
