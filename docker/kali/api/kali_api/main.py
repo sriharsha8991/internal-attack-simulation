@@ -186,12 +186,22 @@ def _discover_tools() -> None:
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get(
+    "/health", 
+    response_model=HealthResponse,
+    summary="Get Sidecar Health Status",
+    description="Check the connectivity and responsiveness of the sidecar API. Also returns the count of discovered red-teaming tools ready to use."
+)
 def health() -> HealthResponse:
     return HealthResponse(status="ok", tools_loaded=len(_TOOL_REGISTRY))
 
 
-@app.post("/exec", response_model=ExecResponse)
+@app.post(
+    "/exec", 
+    response_model=ExecResponse,
+    summary="Execute Attack Commands",
+    description="Execute custom CLI command structures headlessly within the Kali attack environment. Commands are vetted against blocked shell chaining metacharacters for security boundaries."
+)
 async def exec_command(req: ExecRequest) -> ExecResponse:
     if _DANGEROUS_PATTERNS.search(req.command):
         raise HTTPException(
@@ -213,7 +223,12 @@ async def exec_command(req: ExecRequest) -> ExecResponse:
     )
 
 
-@app.post("/upload", response_model=UploadResponse)
+@app.post(
+    "/upload", 
+    response_model=UploadResponse,
+    summary="Upload Files to Sidecar",
+    description="Transfer custom attack scripts, tool configs, or payload binaries from the orchestrator workspace safely into the Kali sandbox space (e.g. /tmp, /data, or /root)."
+)
 async def upload_file(
     file: UploadFile = File(...),
     dest_path: str = Form(...),
@@ -225,7 +240,11 @@ async def upload_file(
     return UploadResponse(path=str(dest), size=len(content))
 
 
-@app.get("/download")
+@app.get(
+    "/download",
+    summary="Download Files from Sidecar",
+    description="Retrieve exfiltrated loot, cracked credential hashes, or BloodHound collected data packages from the Kali sandbox space back to the orchestrator."
+)
 async def download_file(path: str = Query(...)) -> FileResponse:
     resolved = _validate_path(path)
     if not resolved.is_file():
@@ -233,7 +252,12 @@ async def download_file(path: str = Query(...)) -> FileResponse:
     return FileResponse(str(resolved), filename=resolved.name)
 
 
-@app.post("/parse/keys", response_model=KeyParseResponse)
+@app.post(
+    "/parse/keys", 
+    response_model=KeyParseResponse,
+    summary="Parse Cryptographic Keys and Certificates",
+    description="Automatically parses, inspects, and validates SSH public keys, SSL/TLS certificates, or Kerberos keytabs to extract identities, fingerprints, and credential parameters."
+)
 async def parse_keys(req: KeyParseRequest) -> KeyParseResponse:
     credentials: list[ParsedCredential] = []
     errors: list[str] = []
@@ -337,7 +361,12 @@ async def parse_keys(req: KeyParseRequest) -> KeyParseResponse:
     return KeyParseResponse(credentials=credentials, errors=errors)
 
 
-@app.post("/bloodhound/ingest", response_model=BloodHoundIngestResponse)
+@app.post(
+    "/bloodhound/ingest", 
+    response_model=BloodHoundIngestResponse,
+    summary="Collect Active Directory Graph Data",
+    description="Invokes the Python-based BloodHound collector (bloodhound-python) headlessly to query domain parameters, collect nodes/relationships, and compile compressed zip packages ready for ingestion."
+)
 async def bloodhound_ingest(req: BloodHoundIngestRequest) -> BloodHoundIngestResponse:
     output_dir = Path(req.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -373,6 +402,11 @@ async def bloodhound_ingest(req: BloodHoundIngestRequest) -> BloodHoundIngestRes
     )
 
 
-@app.get("/tools", response_model=ToolsResponse)
+@app.get(
+    "/tools", 
+    response_model=ToolsResponse,
+    summary="List Pre-Installed Attack Tools",
+    description="Returns the registry of discovered, pre-installed offensive software packages, post-exploitation scripts, and default security wordlists available for the agent."
+)
 def list_tools() -> ToolsResponse:
     return ToolsResponse(tools=_TOOL_REGISTRY)
