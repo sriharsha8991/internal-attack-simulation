@@ -348,6 +348,45 @@ def detect_issues(
     return issues
 
 
+def derive_phase_done(
+    op_result: OperationResult,
+    issues: list,
+) -> bool:
+    """Decide whether the phase is complete based on execution results.
+
+    The phase is done when:
+      1. The operation didn't fail at the infrastructure level.
+      2. At least one ability passed.
+      3. No critical issues (placeholder tokens, tool-not-found, parse errors).
+      4. A majority of abilities passed — a single passing ability amid
+         mostly-failed ones is not enough to call the phase complete.
+    """
+    total = len(op_result.abilities)
+    if total == 0:
+        return False
+
+    if op_result.operation_status == "failed":
+        return False
+
+    passed_count = sum(1 for a in op_result.abilities if a.passed)
+    if passed_count == 0:
+        return False
+
+    critical_kinds = {
+        IssueKind.PLACEHOLDER_TOKEN,
+        IssueKind.TOOL_NOT_FOUND,
+        IssueKind.PSH_PARSE_ERROR,
+    }
+    critical_issues = [i for i in issues if i.kind in critical_kinds]
+    if critical_issues:
+        return False
+
+    if total > 1 and passed_count < (total / 2):
+        return False
+
+    return True
+
+
 def build_structural_summary(
     result: OperationResult,
     issues: list[StageIssue],

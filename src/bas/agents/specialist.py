@@ -90,29 +90,28 @@ class Planner(Protocol):
 
 
 class LLMPlanner:
-    """Default planner — uses the configured LLM provider via structured output.
+    """Specialist planner driven by an LLM.
 
-    The system prompt is composed from a phase-scoped `PromptProfile` looked up
-    by the skill's `frontmatter.stage`, so different kill-chain phases can
-    inject different requirements / completion criteria without changing the
+    The instance is stateless; context is passed in on every call via the
     agent class.
     """
+
+    # We use LLM string matching to decide if evasion research is needed
+    # because the EDR string in memory can be anything.
+    _PHASE_RESEARCH_QUERIES = {
+        "evasion": "Red team command evasion, AMSI bypass, EDR unhooking",
+    }
 
     def __init__(
         self,
         llm: LLMProvider,
         *,
-        temperature: float = 0.2,
-        profile_resolver=None,
+        temperature: float | None = None,
         catalog: PayloadCatalog | None = None,
     ) -> None:
         self._llm = llm
         self._temperature = temperature
         self._catalog = catalog
-        # Hook lets callers override the skill -> profile mapping for tests.
-        self._profile_resolver = profile_resolver or (
-            lambda skill: get_profile(getattr(skill.frontmatter, "stage", None))
-        )
 
     # Keywords that hint the planner needs vendor-correct package ids /
     # install commands. Used to trigger an optional grounded preflight call.
@@ -192,7 +191,7 @@ class LLMPlanner:
         feedback: str | None = None,
     ) -> SpecialistPlan:
         skill_md = skill.render_for_prompt()
-        profile: PromptProfile = self._profile_resolver(skill)
+        profile: PromptProfile = get_profile(skill.frontmatter.stage)
 
         # ---- optional grounded preflight ------------------------------------
         # Gemini forbids combining `google_search` (grounding) with

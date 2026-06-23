@@ -98,3 +98,19 @@ def resolve_phases_to_skills(
 
 def known_phases(skill_tool: SkillTool) -> list[str]:
     return sorted(build_phase_index(skill_tool).keys())
+
+
+def first_skill_for_phase(phase: str, skill_tool: SkillTool) -> str | None:
+    """Return the canonical playbook (first skill) registered for a phase."""
+    if not phase:
+        return None
+    resolved, _ = resolve_phases_to_skills([phase], skill_tool)
+    return resolved[0] if resolved else None
+
+
+def skills_for_phase(phase: str, skill_tool: SkillTool) -> list[str]:
+    """Return ALL playbook skill names registered for a phase, in order."""
+    if not phase:
+        return []
+    resolved, _ = resolve_phases_to_skills([phase], skill_tool)
+    return resolved

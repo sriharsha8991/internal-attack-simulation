@@ -146,7 +146,8 @@ _MASTER_PLAN_PROMPT = (
     "  Pick exactly ONE phase from `available_phases`. Emit a PhaseBriefing\n"
     "  that the planner will use as its mission statement. Be specific about\n"
     "  what is already known, what is missing, and what constraints apply.\n"
-    "  Make sure to collect and gather the information for a given phase. If not achieved, go for a retry of the same phase with specific instructions on what to fix."
+    "  Make sure to collect and gather the information for a given phase.\n"
+    "  If not achieved, go for a retry of the same phase with specific instructions on what to fix.\n"
     "\n"
     "  You will receive a `phase_history` array: a structured record of every\n"
     "  previously completed phase. Use it to:\n"
@@ -156,6 +157,15 @@ _MASTER_PLAN_PROMPT = (
     "    * Avoid duplicating work already done.\n"
     "    * Reference concrete findings (CIDRs, hosts, services, creds) from\n"
     "      prior phases in your `constraints` and `open_questions`.\n"
+    "\n"
+    "HIGH-INTEGRITY MASTER PLANNING INSTRUCTIONS:\n"
+    "  1. DO NOT SKIP AD-ENUMERATION: If network discovery reveals `network.has_domain_controller = true` or `recon.ad_present = true`,\n"
+    "     the very next phase briefing MUST be `ad-enumeration`. Never route directly to privilege escalation or credentials access without compiling an AD layout first.\n"
+    "  2. EXTRACT TARGET DATA DIRECTLY: Look closely at findings in `phase_history`. If you find a verified Domain Controller (DC) IP or a set of active subnets,\n"
+    "     explicitly populate them into the `constraints` property (e.g. \"DC IP is 192.168.127.11\") so the planner has a clear, non-generic target.\n"
+    "  3. SELF-RECOVERY ON FAILURE: If a previous phase failed (e.g., download timeouts or network blocks listed in `execution_summary` or `phase_history`),\n"
+    "     do NOT silently pass the same strategy. Under `issues_to_fix`, instruct the planner on specific alternative commands (e.g., \"do not download Mimikatz; use comsvcs registry mini-dumps instead\").\n"
+    "  4. KEEP CRITERIA TO THE LETTER: The objective must target the concrete unmet requirements from `COMPLETION CRITERIA`.\n"
     "\n"
     "RULES\n"
     "  * `phase` MUST be one of `available_phases` and MUST NOT be in\n"
@@ -326,7 +336,7 @@ class LLMMasterRouter:
         self,
         llm: LLMProvider,
         *,
-        temperature: float = 0.1,
+        temperature: float | None = None,
         catalog: PayloadCatalog | None = None,
     ) -> None:
         self._llm = llm
@@ -403,7 +413,7 @@ class LLMMasterRouter:
         ]
         verdict = self._llm.generate_structured(
             msgs, MasterDecision, grounding="skip", temperature=self._temperature,
-            thinking="medium",  # reviewing an existing plan, not generating one
+            thinking="high",  # reviewing an existing plan, not generating one
         )
         # Hard guard: if budget is exhausted the master MUST commit.
         if revise_budget <= 0 and verdict.action == "revise":
@@ -428,7 +438,7 @@ class LLMMasterRouter:
         plan_summary: list[dict],
     ) -> MemoryUpdate:
         payload = {
-            "current_memory": memory,
+            "memory": memory,
             "briefing": briefing.model_dump(),
             "plan_summary": plan_summary,
         }
@@ -437,15 +447,13 @@ class LLMMasterRouter:
             LLMMessage(
                 role="user",
                 content=(
-                    "Emit a MemoryUpdate JSON merging this phase's intent "
-                    "into master memory.\n\n"
+                    "Emit a MemoryUpdate JSON. Current memory + just-pushed plan:\n\n"
                     + json.dumps(payload, indent=2, default=str)
                 ),
             ),
         ]
         return self._llm.generate_structured(
-            msgs, MemoryUpdate, grounding="skip", temperature=0.0,
-            thinking="low",  # mechanical: fold this phase's intent into memory
+            msgs, MemoryUpdate, grounding="skip", temperature=self._temperature,
         )
 
     def analyse_results(
@@ -474,58 +482,30 @@ class LLMMasterRouter:
                 ),
             ),
         ]
-        try:
-            triage_text = self._llm.chat(
-                triage_msgs, grounding="skip", temperature=0.0
-            )
-            ability_names = [
-                line.strip().lstrip("- •*")
-                for line in triage_text.strip().splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            ]
-        except Exception as exc:
-            logger.warning("[master/analyse] triage step failed: %s; inspecting all", exc)
-            ability_names = []
+        triage = self._llm.generate_text(
+            triage_msgs, grounding="skip", temperature=self._temperature
+        ).strip().lower()
 
-        # Collect detailed output for selected (or all) abilities
-        detailed_output = ""
-        if results_dir and ability_names:
-            parts: list[str] = []
-            for name in ability_names[:10]:  # cap to prevent context blowup
-                out = read_stage_output(results_dir, operation_id, name.strip())
-                if not out.startswith("[no matching"):
-                    parts.append(out)
-            detailed_output = "\n".join(parts)
-
-        if not detailed_output and results_dir:
-            # Fallback: grab output for ALL abilities (first 5)
-            from ..results import parse_operation_result
-            from ..tools.master_tools import _load_and_parse
-
-            _, op = _load_and_parse(results_dir, operation_id)
-            if op:
-                parts = []
-                for ab in op.abilities[:5]:
-                    out = read_stage_output(results_dir, operation_id, ab.name)
-                    if not out.startswith("[no matching"):
-                        parts.append(out)
-                detailed_output = "\n".join(parts)
+        if triage == "false":
+            return MemoryUpdate(facts={}, narrative="No actionable intel found.")
 
         # Step B — extract confirmed facts from output
-        extract_payload = (
-            f"Structural summary:\n{structural_summary}\n\n"
-            f"Current memory:\n{json.dumps(current_memory, indent=2, default=str)}\n"
-        )
-        if detailed_output:
-            extract_payload += f"\nDetailed stage output:\n{detailed_output}\n"
-
+        extract_payload = {
+            "current_memory": current_memory,
+            "structural_summary": structural_summary,
+        }
         extract_msgs = [
             LLMMessage(role="system", content=_MASTER_ANALYSE_EXTRACT_PROMPT),
-            LLMMessage(role="user", content=extract_payload),
+            LLMMessage(
+                role="user",
+                content=(
+                    "Emit a MemoryUpdate JSON capturing new findings.\n\n"
+                    + json.dumps(extract_payload, indent=2, default=str)
+                ),
+            ),
         ]
         return self._llm.generate_structured(
-            extract_msgs, MemoryUpdate, grounding="skip", temperature=0.0,
-            thinking="medium",  # extracting confirmed facts from raw output
+            extract_msgs, MemoryUpdate, grounding="skip", temperature=self._temperature,
         )
 
 

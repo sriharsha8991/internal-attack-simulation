@@ -329,7 +329,7 @@ Goal: list live hosts in `network.cidr`. Stay inside the foothold's own subnet.
   Covers the full /24 range. Writes `live_hosts.json` (JSON array) to `temp/bas/`.
 
 Both paths MUST write `network.live_hosts` as a JSON array of IP strings.
-Never save as raw text or `Out-String` blob — downstream steps iterate this list.
+Never save as raw text blob — downstream steps iterate this list.
 
 Save: `network.live_hosts` = JSON array of IP strings. Write `temp/bas/live_hosts.txt` (one IP per line).
 

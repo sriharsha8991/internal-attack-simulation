@@ -93,7 +93,7 @@ class LLMEvaluator:
         self,
         llm: LLMProvider,
         *,
-        temperature: float = 0.0,
+        temperature: float | None = None,
         profile_resolver=None,
     ) -> None:
         self._llm = llm
@@ -145,7 +145,7 @@ class LLMEvaluator:
         ]
         return self._llm.generate_structured(
             msgs, EvaluatorVerdict, grounding="skip", temperature=self._temperature,
-            thinking="medium",  # grading against criteria, not generating a plan
+            thinking="high",  # grading against criteria, not generating a plan
         )
 
 

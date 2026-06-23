@@ -140,9 +140,9 @@ class GeminiProvider:
         model: str,
         classifier_model: str,
         api_key: str,
-        temperature: float = 0.2,
+        temperature: float | None = None,
         max_grounded_calls_per_run: int = 40,
-        thinking_level: str = "medium",
+        thinking_level: str = "high",
         max_retries: int = 3,
         retry_base_delay: float = 1.0,
     ) -> None:
@@ -201,9 +201,15 @@ class GeminiProvider:
             self._budget_check()
             tools = [types.Tool(google_search=types.GoogleSearch())]
 
-        kwargs: dict[str, Any] = {
-            "temperature": self._temperature if temperature is None else temperature,
-        }
+        kwargs: dict[str, Any] = {}
+        # As per Gemini 3.x best practices: do not send temperature parameter
+        # to ensure reasoning capabilities remain optimized by defaults.
+        t = temperature if temperature is not None else self._temperature
+        # We DO NOT send `temperature` or `top_p` or `top_k` per Gemini 3 documentation
+        # If it is being passed locally, we explicitly drop it.
+        # if t is not None:
+        #     kwargs["temperature"] = t
+
         if tools:
             kwargs["tools"] = tools
         if response_schema is not None:
@@ -564,7 +570,7 @@ def build_from_env(
     api_key_env: str,
     temperature: float,
     max_grounded_calls_per_run: int,
-    thinking_level: str = "medium",
+    thinking_level: str = "high",
 ) -> GeminiProvider:
     api_key = os.environ.get(api_key_env)
     if not api_key:

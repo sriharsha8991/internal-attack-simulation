@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .utils import _now
+
 # Default number of most-recent narratives included in a prompt projection.
 DEFAULT_PROMPT_NARRATIVES = 6
 
@@ -65,12 +67,7 @@ def _deep_merge(base: dict, delta: dict) -> dict:
     return out
 
 
-def project_for_prompt(
-    memory: dict[str, Any],
-    *,
-    max_narratives: int | None = DEFAULT_PROMPT_NARRATIVES,
-    drop_pending: bool = True,
-) -> dict[str, Any]:
+def project_for_prompt(mem: dict[str, Any]) -> dict[str, Any]:
     """Return a reduced copy of ``memory`` suitable for an LLM prompt.
 
     Strips speculative ``pending.*`` keys (internal bookkeeping with no signal
@@ -78,19 +75,129 @@ def project_for_prompt(
     structured facts are preserved verbatim. The input is never mutated.
     """
     out: dict[str, Any] = {}
-    for k, v in memory.items():
-        if drop_pending and k.startswith(_PENDING_PREFIX):
+    for k, v in mem.items():
+        if k.startswith(_PENDING_PREFIX):
             continue
         if (
             k == "narratives"
             and isinstance(v, list)
-            and max_narratives is not None
-            and len(v) > max_narratives
+            and DEFAULT_PROMPT_NARRATIVES is not None
+            and len(v) > DEFAULT_PROMPT_NARRATIVES
         ):
-            out[k] = v[-max_narratives:]
+            out[k] = v[-DEFAULT_PROMPT_NARRATIVES:]
         else:
             out[k] = v
     return out
+
+
+def persist_memory(state: dict[str, Any], memory: dict[str, Any], *, label: str = "") -> None:
+    """Write the agent's memory and campaign progress to disk as JSON.
+
+    File: ``<results_dir>/../memory.json`` (i.e. ``engagements/<id>/memory.json``).
+    Each write is atomic (tmp + rename) and overwrites the previous snapshot.
+
+    The snapshot includes everything the agent needs to resume:
+    - ``memory``: structured facts, narratives, pending keys
+    - ``campaign_progress``: completed/available/current phases, phase history
+    """
+    import json
+    import os
+    import logging
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+
+    results_dir = state.get("results_dir")
+    if not results_dir:
+        return
+    engagement_dir = Path(results_dir).parent
+    target = engagement_dir / "memory.json"
+    tmp = target.with_suffix(".json.tmp")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Build compact phase history (drop verbose key_commands)
+        phase_history = []
+        for rec in (state.get("phase_history") or []):
+            phase_history.append({
+                "phase": rec.get("phase"),
+                "objective": rec.get("objective"),
+                "outcome": rec.get("outcome"),
+                "skills_used": rec.get("skills_used"),
+                "techniques_used": rec.get("techniques_used"),
+                "ability_names": (rec.get("ability_names") or [])[:10],
+                "execution_outcome": rec.get("execution_outcome"),
+                "memory_delta_keys": rec.get("memory_delta_keys"),
+            })
+
+        completed = list(state.get("completed_phases") or [])
+        available = list(state.get("available_phases") or [])
+        remaining = [p for p in available if p not in completed]
+
+        snapshot = {
+            "run_id": state.get("run_id", ""),
+            "updated_at": _now(),
+            "label": label,
+            "campaign_progress": {
+                "current_phase": state.get("current_phase", ""),
+                "completed_phases": completed,
+                "available_phases": available,
+                "remaining_phases": remaining,
+                "iteration": state.get("iteration", 0),
+                "phase_history": phase_history,
+            },
+            "memory": memory,
+        }
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+        logger.debug(
+            "[memory] persisted %d keys to %s (%s) — completed=%s remaining=%s",
+            len(memory), target, label, completed, remaining,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("[memory] failed to persist memory to %s", target, exc_info=True)
+
+
+def load_memory_from_disk(results_dir: str | None) -> dict[str, Any]:
+    """Reload the full memory snapshot from ``memory.json``.
+
+    Returns the complete snapshot dict with keys:
+    - ``memory``: the agent's structured facts/narratives
+    - ``campaign_progress``: completed_phases, phase_history, etc.
+
+    Returns empty dict if file not found or unreadable.
+    """
+    import json
+    import logging
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+
+    if not results_dir:
+        return {}
+    mem_file = Path(results_dir).parent / "memory.json"
+    if not mem_file.is_file():
+        return {}
+    try:
+        with mem_file.open("r", encoding="utf-8") as f:
+            snapshot = json.load(f)
+        progress = snapshot.get("campaign_progress", {})
+        mem = snapshot.get("memory", {})
+        logger.info(
+            "[memory] reloaded from %s (label=%s) — "
+            "memory_keys=%d completed=%s current=%s remaining=%s",
+            mem_file,
+            snapshot.get("label", ""),
+            len(mem),
+            progress.get("completed_phases", []),
+            progress.get("current_phase", ""),
+            progress.get("remaining_phases", []),
+        )
+        return snapshot
+    except Exception:  # noqa: BLE001
+        logger.warning("[memory] failed to reload from %s", mem_file, exc_info=True)
+        return {}
 
 
 class CampaignMemory:

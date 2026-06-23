@@ -111,8 +111,8 @@ class LlmConfig(StrictModel):
     model: str = "gemini-3.5-flash"
     classifier_model: str = "gemini-3.5-flash"
     api_key_env: str = "GEMINI_API_KEY"
-    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    thinking_level: str = Field(default="medium", description="Thinking level: off, low, medium, high")
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Leave None to use Gemini 3.x defaults")
+    thinking_level: str = Field(default="high", description="Thinking level: off, low, medium, high")
     grounding: GroundingConfig = Field(default_factory=GroundingConfig)
 
     @field_validator("provider")

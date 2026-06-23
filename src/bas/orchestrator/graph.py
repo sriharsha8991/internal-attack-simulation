@@ -57,326 +57,37 @@ from ..agents.specialist import (
 )
 from ..client import BasClient
 from ..persistence import ArtifactStore
-from ..phases import resolve_phases_to_skills
+from ..phases import resolve_phases_to_skills, first_skill_for_phase, skills_for_phase
 from ..results import (
     OperationResult,
     build_structural_summary,
     detect_issues,
     parse_operation_result,
+    derive_phase_done,
 )
 from ..tools.skill_tool import SkillTool
 from .memory import (
     CampaignMemory,
-    _deep_merge,  # re-exported for backwards-compatible imports/tests
-    _merge_lists,  # noqa: F401  (re-export)
+    _deep_merge,
+    _merge_lists,
     project_for_prompt,
+    persist_memory,
+    load_memory_from_disk,
 )
-from .state import DONE_SENTINEL, PhaseRecord, SessionState, StageResult
+from .state import (
+    DONE_SENTINEL, 
+    PhaseRecord, 
+    SessionState, 
+    StageResult,
+    phase_history_compact,
+    skill_data_from_push,
+    consolidate_phase_record,
+    log_proposal,
+    build_phase_asset_map,
+)
+from .utils import _now, _log_step
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _first_skill_for_phase(phase: str, skill_tool: SkillTool) -> str | None:
-    """Return the canonical playbook (first skill) registered for a phase."""
-    if not phase:
-        return None
-    resolved, _ = resolve_phases_to_skills([phase], skill_tool)
-    return resolved[0] if resolved else None
-
-
-def _skills_for_phase(phase: str, skill_tool: SkillTool) -> list[str]:
-    """Return ALL playbook skill names registered for a phase, in order."""
-    if not phase:
-        return []
-    resolved, _ = resolve_phases_to_skills([phase], skill_tool)
-    return resolved
-
-
-def _log_step(tag: str, msg: str, *, level: str = "info") -> None:
-    """Emit a visually distinct graph-step line.
-
-    Format: ``[GRAPH][TAG          ]  message``
-    The fixed-width tag makes it easy to grep / column-align in log viewers.
-    """
-    getattr(logger, level)("[GRAPH][%-16s]  %s", tag, msg)
-
-
-def _persist_memory(state: "SessionState", memory: dict[str, Any], *, label: str = "") -> None:
-    """Write the agent's memory and campaign progress to disk as JSON.
-
-    File: ``<results_dir>/../memory.json`` (i.e. ``engagements/<id>/memory.json``).
-    Each write is atomic (tmp + rename) and overwrites the previous snapshot.
-
-    The snapshot includes everything the agent needs to resume:
-    - ``memory``: structured facts, narratives, pending keys
-    - ``campaign_progress``: completed/available/current phases, phase history
-    """
-    import json
-    import os
-    from pathlib import Path
-
-    results_dir = state.get("results_dir")
-    if not results_dir:
-        return
-    engagement_dir = Path(results_dir).parent
-    target = engagement_dir / "memory.json"
-    tmp = target.with_suffix(".json.tmp")
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        # Build compact phase history (drop verbose key_commands)
-        phase_history = []
-        for rec in (state.get("phase_history") or []):
-            phase_history.append({
-                "phase": rec.get("phase"),
-                "objective": rec.get("objective"),
-                "outcome": rec.get("outcome"),
-                "skills_used": rec.get("skills_used"),
-                "techniques_used": rec.get("techniques_used"),
-                "ability_names": (rec.get("ability_names") or [])[:10],
-                "execution_outcome": rec.get("execution_outcome"),
-                "memory_delta_keys": rec.get("memory_delta_keys"),
-            })
-
-        completed = list(state.get("completed_phases") or [])
-        available = list(state.get("available_phases") or [])
-        remaining = [p for p in available if p not in completed]
-
-        snapshot = {
-            "run_id": state.get("run_id", ""),
-            "updated_at": _now(),
-            "label": label,
-            "campaign_progress": {
-                "current_phase": state.get("current_phase", ""),
-                "completed_phases": completed,
-                "available_phases": available,
-                "remaining_phases": remaining,
-                "iteration": state.get("iteration", 0),
-                "phase_history": phase_history,
-            },
-            "memory": memory,
-        }
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(snapshot, f, indent=2, default=str)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, target)
-        logger.debug(
-            "[memory] persisted %d keys to %s (%s) — completed=%s remaining=%s",
-            len(memory), target, label, completed, remaining,
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("[memory] failed to persist memory to %s", target, exc_info=True)
-
-
-def _phase_history_compact(
-    phase_history: list[dict[str, Any]],
-    *,
-    max_entries: int = 5,
-    max_commands_per_phase: int = 3,
-    max_cmd_len: int = 120,
-) -> list[dict[str, Any]]:
-    """Return a trimmed view of phase_history for prompt injection.
-
-    Keeps only the most recent ``max_entries`` phases and truncates the
-    potentially long ``key_commands`` list so context usage stays bounded.
-    """
-    recent = (phase_history or [])[-max_entries:]
-    result = []
-    for rec in recent:
-        result.append({
-            "phase": rec.get("phase"),
-            "objective": rec.get("objective"),
-            "outcome": rec.get("outcome"),
-            "skills_used": rec.get("skills_used"),
-            "techniques_used": rec.get("techniques_used"),
-            "ability_names": (rec.get("ability_names") or [])[:5],
-            "key_commands": [
-                cmd[:max_cmd_len]
-                for cmd in (rec.get("key_commands") or [])[:max_commands_per_phase]
-            ],
-            "memory_delta_keys": rec.get("memory_delta_keys"),
-        })
-    return result
-
-
-def _skill_data_from_push(
-    skill_name: str,
-    push: "PushResult",
-    mem_update: "MemoryUpdate",
-) -> dict[str, Any]:
-    """Build a per-skill summary dict for accumulation in phase_skills_buffer."""
-    ability_names = [ab.get("name", "") for ab in push.plan_summary]
-    techniques = list(
-        {ab.get("mitre_technique_id", "") for ab in push.plan_summary} - {"", None}
-    )
-    key_commands: list[str] = []
-    for ab in push.plan_summary:
-        for stg in ab.get("stages") or []:
-            cmd = stg.get("command_template") or ""
-            if cmd:
-                key_commands.append(cmd[:200])
-    return {
-        "skill": skill_name,
-        "abilities_pushed": len(push.ability_ids),
-        "adversary_id": push.adversary_id,
-        "ability_ids": push.ability_ids,
-        "ability_names": ability_names,
-        "techniques_used": techniques,
-        "key_commands": key_commands[:15],
-        "outcome": "committed" if push.success else "failed",
-        "memory_delta_keys": list((mem_update.facts or {}).keys()),
-        "stage_id_map": push.stage_id_map,
-    }
-
-
-def _consolidate_phase_record(
-    phase: str,
-    briefing_obj: "PhaseBriefing",
-    all_skill_data: list[dict[str, Any]],
-    state: "SessionState",
-) -> "PhaseRecord":
-    """Merge all per-skill push summaries into one PhaseRecord for the phase.
-
-    This produces a single record regardless of how many skills the phase ran,
-    so the master always sees exactly one entry per completed phase in
-    ``phase_history``.
-    """
-    all_names: list[str] = []
-    all_techs: set[str] = set()
-    all_cmds: list[str] = []
-    all_mem_keys: set[str] = set()
-    total_abilities = 0
-    adversary_id: str | None = None
-
-    for sd in all_skill_data:
-        all_names.extend(sd.get("ability_names") or [])
-        all_techs.update(sd.get("techniques_used") or [])
-        all_cmds.extend(sd.get("key_commands") or [])
-        all_mem_keys.update(sd.get("memory_delta_keys") or [])
-        total_abilities += sd.get("abilities_pushed") or 0
-        if not adversary_id and sd.get("adversary_id"):
-            adversary_id = sd["adversary_id"]
-
-    any_committed = any(sd.get("outcome") == "committed" for sd in all_skill_data)
-    return PhaseRecord(
-        phase=phase,
-        objective=briefing_obj.objective,
-        skills_used=[sd["skill"] for sd in all_skill_data],
-        abilities_pushed=total_abilities,
-        adversary_id=adversary_id,
-        ability_names=all_names,
-        techniques_used=list(all_techs),
-        key_commands=all_cmds[:15],
-        outcome="committed" if any_committed else "failed",
-        master_revisions=int(state.get("master_revisions_used", 0)),
-        planner_attempts=int(state.get("planner_attempts", 0)),
-        memory_delta_keys=list(all_mem_keys),
-    )
-
-
-def _log_proposal(
-    state: SessionState,
-    *,
-    audience: str,
-    phase: str,
-    attempt: int,
-    plan_summary: list[dict[str, Any]],
-    note: str = "",
-) -> list[dict[str, Any]]:
-    """Append one proposal record to state['proposal_log']. Captures full
-    command_template strings so the audit log is the source of truth on every
-    revision the planner emitted."""
-    proposals = list(state.get("proposal_log") or [])
-    entry: dict[str, Any] = {
-        "ts": _now(),
-        "phase": phase,
-        "audience": audience,  # 'evaluator' or 'master'
-        "attempt": attempt,
-        "note": note,
-        "abilities": [
-            {
-                "name": ab.get("name"),
-                "mitre_technique_id": ab.get("mitre_technique_id"),
-                "platform": ab.get("platform"),
-                "rationale": (ab.get("rationale") or "")[:400],
-                "stages": [
-                    {
-                        "order": s.get("order"),
-                        "executor": s.get("executor"),
-                        "command_template": s.get("command_template"),
-                    }
-                    for s in ab.get("stages") or []
-                ],
-            }
-            for ab in plan_summary
-        ],
-    }
-    proposals.append(entry)
-    # Also mirror a compact line into the human log so tail-N is informative.
-    cmds = sum(len(ab.get("stages") or []) for ab in plan_summary)
-    logger.info(
-        "[proposal] -> %s phase=%s attempt=%d abilities=%d commands=%d note=%r",
-        audience,
-        phase,
-        attempt,
-        len(plan_summary),
-        cmds,
-        note,
-    )
-    return proposals
-
-
-# ---------------------------------------------------------------------------
-# nodes
-# ---------------------------------------------------------------------------
-
-
-def _load_memory_from_disk(results_dir: str | None) -> dict[str, Any]:
-    """Reload the full memory snapshot from ``memory.json``.
-
-    Returns the complete snapshot dict with keys:
-    - ``memory``: the agent's structured facts/narratives
-    - ``campaign_progress``: completed_phases, phase_history, etc.
-
-    Returns empty dict if file not found or unreadable.
-    """
-    import json
-    from pathlib import Path
-
-    if not results_dir:
-        return {}
-    mem_file = Path(results_dir).parent / "memory.json"
-    if not mem_file.is_file():
-        return {}
-    try:
-        with mem_file.open("r", encoding="utf-8") as f:
-            snapshot = json.load(f)
-        progress = snapshot.get("campaign_progress", {})
-        mem = snapshot.get("memory", {})
-        logger.info(
-            "[memory] reloaded from %s (label=%s) — "
-            "memory_keys=%d completed=%s current=%s remaining=%s",
-            mem_file,
-            snapshot.get("label", ""),
-            len(mem),
-            progress.get("completed_phases", []),
-            progress.get("current_phase", ""),
-            progress.get("remaining_phases", []),
-        )
-        return snapshot
-    except Exception:  # noqa: BLE001
-        logger.warning("[memory] failed to reload from %s", mem_file, exc_info=True)
-        return {}
 
 
 def _init_node(state: SessionState) -> dict[str, Any]:
@@ -393,7 +104,7 @@ def _init_node(state: SessionState) -> dict[str, Any]:
     current_phase = state.get("current_phase", "") or ""
 
     if not memory:
-        snapshot = _load_memory_from_disk(state.get("results_dir"))
+        snapshot = load_memory_from_disk(state.get("results_dir"))
         if snapshot:
             memory = snapshot.get("memory", {})
             progress = snapshot.get("campaign_progress", {})
@@ -501,7 +212,7 @@ def _master_review(
     )
     eval_verdict = state.get("last_evaluator_verdict") or {}
 
-    proposals = _log_proposal(
+    proposals = log_proposal(
         state,
         audience="master",
         phase=phase,
@@ -672,7 +383,7 @@ def _master_pick_phase(
                 "log": log,
             }
 
-    next_skill = _first_skill_for_phase(briefing.phase, skill_tool)
+    next_skill = first_skill_for_phase(briefing.phase, skill_tool)
     if next_skill is None:
         # No skill registered — route directly to push (which skips gracefully)
         # instead of wasting a plan→evaluate→escalate→push-skip loop.
@@ -696,7 +407,7 @@ def _master_pick_phase(
             "log": log,
         }
 
-    all_skills = _skills_for_phase(briefing.phase, skill_tool)
+    all_skills = skills_for_phase(briefing.phase, skill_tool)
     msg = (
         f"[master_plan/pick] phase={briefing.phase} skills={all_skills} "
         f"objective={briefing.objective!r}"
@@ -803,7 +514,7 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         # the briefing + compact phase history so the planner prompt stays bounded.
         memory_with_brief = project_for_prompt(state.get("memory") or {})
         memory_with_brief["_master_briefing"] = briefing
-        memory_with_brief["_phase_history"] = _phase_history_compact(
+        memory_with_brief["_phase_history"] = phase_history_compact(
             list(state.get("phase_history") or [])
         )
 
@@ -813,7 +524,7 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         planned: PlanResult = plan_specialist(
             plan_state, planner=planner, skill_tool=skill_tool, feedback=feedback
         )
-        proposals = _log_proposal(
+        proposals = log_proposal(
             state,
             audience="evaluator",
             phase=phase,
@@ -1101,7 +812,7 @@ def _make_push_node(
         )
         new_memory = mem.data
 
-        _persist_memory(state, new_memory, label=f"push/{phase}/{skill_name}")
+        persist_memory(state, new_memory, label=f"push/{phase}/{skill_name}")
 
         msg = (
             f"[push] phase={phase} skill={skill_name} success={push.success} "
@@ -1120,7 +831,7 @@ def _make_push_node(
         )
 
         # ---- accumulate per-skill data in buffer ----------------------------
-        skill_data = _skill_data_from_push(skill_name, push, mem_update)
+        skill_data = skill_data_from_push(skill_name, push, mem_update)
         skills_buffer = list(state.get("phase_skills_buffer") or [])
         skills_buffer.append(skill_data)
 
@@ -1164,7 +875,7 @@ def _make_push_node(
         briefing_obj = PhaseBriefing.model_validate(
             state.get("master_briefing") or {"phase": phase}
         )
-        phase_rec = _consolidate_phase_record(phase, briefing_obj, skills_buffer, state)
+        phase_rec = consolidate_phase_record(phase, briefing_obj, skills_buffer, state)
         history = list(state.get("phase_history") or [])
         history.append(phase_rec.model_dump(mode="json"))
 
@@ -1295,7 +1006,7 @@ def _make_analyse_results_node(master: MasterPolicy):
 
         # Safety: if checkpointer didn't restore memory, reload from disk.
         if not state.get("memory"):
-            snapshot = _load_memory_from_disk(state.get("results_dir"))
+            snapshot = load_memory_from_disk(state.get("results_dir"))
             if snapshot:
                 state = dict(state)  # type: ignore[assignment]
                 state["memory"] = snapshot.get("memory", {})
@@ -1347,7 +1058,7 @@ def _make_analyse_results_node(master: MasterPolicy):
                 level="warning",
             )
 
-            _persist_memory(state, new_memory, label=f"analyse/timeout/{phase}")
+            persist_memory(state, new_memory, label=f"analyse/timeout/{phase}")
 
             return {
                 "memory": new_memory,
@@ -1404,7 +1115,7 @@ def _make_analyse_results_node(master: MasterPolicy):
             .data
         )
 
-        _persist_memory(state, new_memory, label=f"analyse/{phase}/{op_result.operation_id[:8]}")
+        persist_memory(state, new_memory, label=f"analyse/{phase}/{op_result.operation_id[:8]}")
 
         # 4. Phase done decision
         phase_done = _derive_phase_done(op_result, issues)

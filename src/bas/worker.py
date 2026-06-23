@@ -219,7 +219,7 @@ def _notify_completion(engagement_id: str, status: str) -> None:
 class _DryRunStubPlanner:
     """Offline plan generator used only when dry_run=True and no LLM key."""
 
-    def plan(self, skill, state):  # type: ignore[override]
+    def plan(self, skill, state, *, feedback: str | None = None):  # type: ignore[override]
         from .agents import SpecialistPlan
         from .models import (
             AbilityCreate,
