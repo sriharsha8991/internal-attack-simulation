@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BAS Simulation & Skill Editor Console</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Alpine.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- EasyMDE (Markdown Editor) CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+
+  <style>
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1f2937;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #4b5563;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #6b7280;
+    }
+    .easymde-editor-container .editor-toolbar {
+      background: #1f2937 !important;
+      border-color: #374151 !important;
+    }
+    .easymde-editor-container .editor-toolbar button {
+      color: #e5e7eb !important;
+    }
+    .easymde-editor-container .editor-toolbar button.active,
+    .easymde-editor-container .editor-toolbar button:hover {
+      background: #374151 !important;
+    }
+    .easymde-editor-container .CodeMirror {
+      background: #111827 !important;
+      color: #f3f4f6 !important;
+      border-color: #374151 !important;
+    }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col font-sans" x-data="consoleApp()">
+
+  <!-- Top Header Navigation -->
+  <header class="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between shadow-md">
+    <div class="flex items-center space-x-3">
+      <div class="bg-red-600 p-2 rounded-lg flex items-center justify-center text-white">
+        <i class="fa-solid fa-shield-halved text-xl"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-wider text-red-500">BAS ORCHESTRATOR</h1>
+        <p class="text-xs text-gray-400">Autonomous Internal Simulation Engine</p>
+      </div>
+    </div>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="flex space-x-1">
+      <button 
+        @click="switchTab('dashboard')"
+        :class="activeTab === 'dashboard' ? 'bg-red-600/10 text-red-400 border border-red-500/20' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center space-x-2">
+        <i class="fa-solid fa-cubes"></i>
+        <span>Dashboard & Triggers</span>
+      </button>
+      <button 
+        @click="switchTab('editor')"
+        :class="activeTab === 'editor' ? 'bg-red-600/10 text-red-400 border border-red-500/20' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center space-x-2">
+        <i class="fa-solid fa-code-pull-request"></i>
+        <span>Playbook Editor</span>
+      </button>
+      <button 
+        @click="switchTab('audits')"
+        :class="activeTab === 'audits' ? 'bg-red-600/10 text-red-400 border border-red-500/20' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+        class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center space-x-2">
+        <i class="fa-solid fa-clipboard-list"></i>
+        <span>Modification Audits</span>
+      </button>
+    </nav>
+
+    <!-- Sidecar Health Status Badge -->
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+        </span>
+        <span class="text-xs text-gray-300 font-medium">Kali API: Online</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notification Banner -->
+  <div x-show="toast.show" 
+       x-transition:enter="transition ease-out duration-300"
+       x-transition:enter-start="opacity-0 transform translate-y-2"
+       x-transition:enter-end="opacity-100 transform translate-y-0"
+       x-transition:leave="transition ease-in duration-200"
+       x-transition:leave-start="opacity-100 transform translate-y-0"
+       x-transition:leave-end="opacity-0 transform translate-y-2"
+       :class="toast.type === 'error' ? 'bg-red-950/80 border-red-900/50 text-red-400' : 'bg-emerald-950/80 border-emerald-900/50 text-emerald-400'"
+       class="fixed bottom-6 right-6 px-4 py-3 rounded-lg border shadow-xl z-50 flex items-center space-x-3 backdrop-blur-md max-w-md">
+    <i :class="toast.type === 'error' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-check'" class="text-lg"></i>
+    <span class="text-sm font-medium" x-text="toast.message"></span>
+    <button @click="toast.show = false" class="text-gray-400 hover:text-white transition">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+
+  <!-- Main Content Body -->
+  <main class="flex-1 flex overflow-hidden">
+
+    <!-- 1. DASHBOARD TAB -->
+    <div x-show="activeTab === 'dashboard'" class="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col md:flex-row md:space-x-6 md:space-y-0">
+      
+      <!-- Left Column: Trigger Form -->
+      <div class="md:w-1/3 bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-lg flex flex-col justify-between">
+        <div>
+          <div class="flex items-center space-x-2 pb-4 mb-6 border-b border-gray-800">
+            <i class="fa-solid fa-fire text-red-500 text-lg"></i>
+            <h2 class="text-md font-bold tracking-wide">Trigger Simulation</h2>
+          </div>
+
+          <form @submit.prevent="triggerEngagement" class="space-y-5">
+            <!-- Target Environment Selection -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Select Target Lab Environment</label>
+              <select x-model="form.environment" class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-red-500 transition">
+                <option value="">-- Let Orchestrator Resolve --</option>
+                <template x-for="env in environments" :key="env.id">
+                  <option :value="env.id" x-text="env.name"></option>
+                </template>
+              </select>
+            </div>
+
+            <!-- Target Platform Selection -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Target Platform</label>
+              <div class="grid grid-cols-2 gap-3">
+                <label :class="form.platform === 'windows' ? 'border-red-500/50 bg-red-950/10' : 'border-gray-800 bg-gray-950'" class="flex items-center justify-center p-3 border rounded-lg cursor-pointer hover:border-gray-700 transition">
+                  <input type="radio" x-model="form.platform" value="windows" class="hidden">
+                  <i class="fa-brands fa-windows text-blue-400 mr-2"></i>
+                  <span class="text-sm font-medium">Windows</span>
+                </label>
+                <label :class="form.platform === 'linux' ? 'border-red-500/50 bg-red-950/10' : 'border-gray-800 bg-gray-950'" class="flex items-center justify-center p-3 border rounded-lg cursor-pointer hover:border-gray-700 transition">
+                  <input type="radio" x-model="form.platform" value="linux" class="hidden">
+                  <i class="fa-brands fa-linux text-yellow-400 mr-2"></i>
+                  <span class="text-sm font-medium">Linux</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Run Parameters -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Max Iterations</label>
+                <input type="number" x-model="form.max_iterations" min="1" max="100" class="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500 transition">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Sim Mode</label>
+                <div class="flex items-center h-10">
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" x-model="form.dry_run" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                    <span class="ml-3 text-sm font-medium" x-text="form.dry_run ? 'Dry Run' : 'Active Execution'"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Playbook/Phases Checklist -->
+            <div>
+              <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Campaign Phases</label>
+              <p class="text-xs text-gray-500 mb-2">Leave blank to run all phases in order.</p>
+              <div class="space-y-2 bg-gray-950 p-3 rounded-lg border border-gray-800 max-h-48 overflow-y-auto">
+                <template x-for="phase in all_possible_phases" :key="phase">
+                  <label class="flex items-center space-x-3 cursor-pointer p-1 rounded hover:bg-gray-900 transition">
+                    <input type="checkbox" :value="phase" x-model="form.phases" class="rounded bg-gray-900 border-gray-800 text-red-600 focus:ring-red-500">
+                    <span class="text-sm font-medium capitalize" x-text="phase"></span>
+                  </label>
+                </template>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <button @click="triggerEngagement" :disabled="submitting" class="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg shadow-red-900/10 active:scale-95 transition-all flex items-center justify-center space-x-2">
+          <i x-show="submitting" class="fa-solid fa-circle-notch animate-spin mr-2"></i>
+          <i x-show="!submitting" class="fa-solid fa-rocket mr-2"></i>
+          <span x-text="submitting ? 'Queuing Campaign...' : 'Launch Simulation Campaign'"></span>
+        </button>
+      </div>
+
+      <!-- Right Column: Active & History Engagements -->
+      <div class="flex-1 bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-lg flex flex-col">
+        <div class="flex items-center justify-between pb-4 mb-6 border-b border-gray-800">
+          <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-clock-history text-red-500 text-lg"></i>
+            <h2 class="text-md font-bold tracking-wide">Simulation Logs & History</h2>
+          </div>
+          <button @click="fetchEngagements()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
+            <i class="fa-solid fa-rotate mr-1"></i> Refresh
+          </button>
+        </div>
+
+        <!-- Engagements Table -->
+        <div class="flex-1 overflow-y-auto max-h-[600px] border border-gray-800 rounded-lg">
+          <table class="w-full text-left border-collapse">
+            <thead class="bg-gray-950 text-xs font-semibold uppercase tracking-wider text-gray-400 sticky top-0 border-b border-gray-800">
+              <tr>
+                <th class="px-6 py-4">Engagement ID / Name</th>
+                <th class="px-6 py-4">Phases</th>
+                <th class="px-6 py-4">Platform</th>
+                <th class="px-6 py-4">Mode</th>
+                <th class="px-6 py-4">Status</th>
+                <th class="px-6 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800 text-sm text-gray-300">
+              <template x-for="item in engagements" :key="item.run_id">
+                <tr class="hover:bg-gray-800/40 transition">
+                  <td class="px-6 py-4 font-mono text-xs">
+                    <span x-text="item.run_id.substring(0, 12)"></span>...
+                    <div class="text-[10px] text-gray-400 mt-1" x-text="formatDate(item.started_at)"></div>
+                  </td>
+                  <td class="px-6 py-4 font-medium capitalize">
+                    <span x-text="(item.skill_order || item.request?.phases || []).join(', ')"></span>
+                  </td>
+                  <td class="px-6 py-4 font-mono text-xs capitalize" x-text="item.foothold?.platform || item.request?.target?.platform || 'any'"></td>
+                  <td class="px-6 py-4">
+                    <span :class="item.request?.dry_run ? 'bg-amber-950 text-yellow-500 border-yellow-900/30' : 'bg-red-950 text-red-500 border-red-900/30'" class="px-2 py-0.5 rounded-full text-xs border font-medium">
+                      <span x-text="item.request?.dry_run ? 'Dry Run' : 'Active'"></span>
+                    </span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span :class="{
+                      'bg-emerald-950/80 text-emerald-400 border-emerald-900/40': item.status === 'completed',
+                      'bg-blue-950/80 text-blue-400 border-blue-900/40': item.status === 'running',
+                      'bg-amber-950/80 text-amber-400 border-amber-900/40': item.status === 'awaiting_results',
+                      'bg-red-950/80 text-red-400 border-red-900/40': item.status === 'failed',
+                    }" class="px-2 py-1 border rounded-full text-xs font-semibold capitalize flex items-center justify-center w-28">
+                      <span x-text="item.status"></span>
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 text-right">
+                    <button @click="viewEngagementLogs(item.run_id)" class="text-red-400 hover:text-red-300 font-medium text-xs px-2 py-1 rounded hover:bg-gray-800 transition">
+                      <i class="fa-solid fa-terminal mr-1"></i> View Log
+                    </button>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="engagements.length === 0">
+                <tr>
+                  <td colspan="6" class="px-6 py-8 text-center text-gray-500 font-medium">
+                    No simulation records found. Submit the trigger form to launch a campaign.
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. PLAYBOOK EDITOR TAB -->
+    <div x-show="activeTab === 'editor'" class="flex-1 flex overflow-hidden">
+      <!-- Sidebar Phase/Skill Select -->
+      <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col p-4 shadow-lg overflow-y-auto">
+        <div class="flex items-center space-x-2 pb-3 mb-4 border-b border-gray-800">
+          <i class="fa-solid fa-book-open text-red-500"></i>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400">Select Playbook</h2>
+        </div>
+
+        <div class="space-y-1">
+          <template x-for="skill in skillsCatalog" :key="skill.name">
+            <button 
+              @click="selectSkill(skill.name)"
+              :class="selectedSkill === skill.name ? 'bg-red-600/10 text-red-400 border-red-500/20' : 'text-gray-300 hover:bg-gray-800/40'"
+              class="w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium border border-transparent transition flex flex-col justify-between">
+              <span class="font-semibold text-gray-200 capitalize" x-text="skill.name.replace('-', ' ')"></span>
+              <span class="text-[10px] text-gray-500 mt-1 capitalize" x-text="skill.stage"></span>
+            </button>
+          </template>
+        </div>
+      </aside>
+
+      <!-- Main Editor Panel -->
+      <section class="flex-1 flex flex-col overflow-hidden bg-gray-950 p-6 space-y-4">
+        <!-- Editor Controls (Select Files and Submit Audit Metadata) -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div class="flex items-center space-x-3">
+            <div class="bg-red-950 border border-red-900/30 px-3 py-1.5 rounded-lg">
+              <span class="text-xs font-bold text-red-400 uppercase font-mono" x-text="selectedSkill ? selectedSkill : 'No Skill Selected'"></span>
+            </div>
+            
+            <!-- File tabs -->
+            <div class="flex bg-gray-950 p-1 rounded-lg border border-gray-800">
+              <button 
+                @click="selectFile('skill')"
+                :class="selectedFileType === 'skill' ? 'bg-gray-800 text-white font-medium' : 'text-gray-400 hover:text-white'"
+                class="px-3 py-1 rounded text-xs transition">
+                SKILL.md
+              </button>
+              <button 
+                @click="selectFile('commands')"
+                :class="selectedFileType === 'commands' ? 'bg-gray-800 text-white font-medium' : 'text-gray-400 hover:text-white'"
+                class="px-3 py-1 rounded text-xs transition">
+                tool-commands.md
+              </button>
+              <button 
+                @click="selectFile('techniques')"
+                :class="selectedFileType === 'techniques' ? 'bg-gray-800 text-white font-medium' : 'text-gray-400 hover:text-white'"
+                class="px-3 py-1 rounded text-xs transition">
+                techniques.md
+              </button>
+            </div>
+          </div>
+
+          <!-- Operator Details / Change Log Fields -->
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 pointer-events-none text-xs">
+                <i class="fa-solid fa-user"></i>
+              </span>
+              <input type="text" x-model="editorForm.username" placeholder="Operator Name" class="bg-gray-950 border border-gray-800 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-red-500 transition w-36">
+            </div>
+            <input type="text" x-model="editorForm.change_summary" placeholder="Summary of changes (Required)" class="bg-gray-950 border border-gray-800 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-red-500 transition w-64">
+            
+            <button @click="saveSkillFile" :disabled="saving" class="bg-red-600 hover:bg-red-700 disabled:bg-gray-800 text-white text-xs font-semibold px-4 py-2 rounded-lg transition active:scale-95 flex items-center">
+              <i x-show="saving" class="fa-solid fa-circle-notch animate-spin mr-1"></i>
+              <i x-show="!saving" class="fa-solid fa-cloud-arrow-up mr-1"></i>
+              <span>Save Changes</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Markdown Visual Editor Container -->
+        <div class="flex-1 min-h-[400px] bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-lg flex flex-col relative">
+          <!-- Textarea that EasyMDE attaches to -->
+          <div class="flex-1 easymde-editor-container overflow-hidden">
+            <textarea id="markdown-textarea"></textarea>
+          </div>
+          <!-- Loader cover -->
+          <div x-show="loadingFile" class="absolute inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-10">
+            <div class="text-center space-y-2">
+              <i class="fa-solid fa-circle-notch animate-spin text-red-500 text-2xl"></i>
+              <p class="text-xs text-gray-400 font-medium">Fetching raw playbook Markdown...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 3. MODIFICATION AUDITS TAB -->
+    <div x-show="activeTab === 'audits'" class="flex-1 overflow-y-auto p-6 space-y-6">
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-lg">
+        <div class="flex items-center justify-between pb-4 mb-6 border-b border-gray-800">
+          <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-shield text-red-500 text-lg"></i>
+            <h2 class="text-md font-bold tracking-wide">Change Modification Audits (Playbooks Only)</h2>
+          </div>
+          <button @click="fetchAuditLogs()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
+            <i class="fa-solid fa-rotate mr-1"></i> Refresh Log
+          </button>
+        </div>
+
+        <!-- Audit list timeline -->
+        <div class="space-y-4 max-w-4xl">
+          <template x-for="log in auditLogs" :key="log.timestamp">
+            <div class="bg-gray-950 border border-gray-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between shadow transition-all hover:border-gray-700">
+              <div class="flex items-start space-x-4">
+                <div class="bg-red-950 p-2.5 rounded-lg text-red-400 flex items-center justify-center mt-1">
+                  <i class="fa-solid fa-user-pen"></i>
+                </div>
+                <div>
+                  <div class="flex items-center space-x-2">
+                    <span class="font-bold text-gray-200" x-text="log.username"></span>
+                    <span class="text-xs text-gray-500">•</span>
+                    <span class="text-xs text-gray-400" x-text="formatDate(log.timestamp)"></span>
+                  </div>
+                  <p class="text-xs text-red-400 font-mono mt-1">
+                    Modified: <span x-text="log.skill"></span> / <span x-text="log.file"></span>
+                  </p>
+                  <p class="text-sm text-gray-300 font-medium mt-2 bg-gray-900 px-3 py-2 rounded border border-gray-800/50" x-text="log.details ? log.details : 'No change description supplied'"></p>
+                </div>
+              </div>
+              <div class="text-right mt-3 md:mt-0">
+                <span class="bg-emerald-950 text-emerald-400 border-emerald-900/30 border px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">
+                  <i class="fa-solid fa-check mr-1"></i> Logged
+                </span>
+              </div>
+            </div>
+          </template>
+          <template x-if="auditLogs.length === 0">
+            <div class="text-center py-12 text-gray-500 font-medium">
+              No manual playbooks edits logged yet. All changes will compile a persistent audit trail.
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ENGAGEMENT LOGS MODAL -->
+  <div x-show="logsModal.show" class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50" style="display: none;">
+    <div class="bg-[#1e1e1e] border border-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+      <div class="px-6 py-4 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-terminal text-red-500"></i>
+          <h3 class="text-md font-bold text-gray-200 font-mono">Engagement Audit Log (ID: <span x-text="logsModal.runId.substring(0, 12)"></span>)</h3>
+        </div>
+        <button @click="logsModal.show = false" class="text-gray-400 hover:text-white transition text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Logs content terminal -->
+      <div class="flex-1 p-6 overflow-y-auto bg-black text-gray-300 font-mono text-xs space-y-1.5 max-h-[550px]" id="modal-terminal-output">
+        <template x-for="line in logsModal.lines" :key="line">
+          <div class="leading-relaxed hover:bg-gray-900/40 px-2 py-0.5 rounded" x-text="line"></div>
+        </template>
+        <template x-if="logsModal.lines.length === 0">
+          <div class="text-center py-12 text-gray-500">Loading audit log details from workspace...</div>
+        </template>
+      </div>
+
+      <div class="px-6 py-4 bg-gray-900 border-t border-gray-800 flex justify-end space-x-3">
+        <button @click="fetchEngagementLogs(logsModal.runId)" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center">
+          <i class="fa-solid fa-rotate mr-1"></i> Refresh
+        </button>
+        <button @click="logsModal.show = false" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EasyMDE Initialization script -->
+  <script>
+    let easyMDE;
+
+    function initEasyMDE(initialContent = '') {
+      if (easyMDE) {
+        easyMDE.value(initialContent);
+        return;
+      }
+      easyMDE = new EasyMDE({
+        element: document.getElementById('markdown-textarea'),
+        initialValue: initialContent,
+        renderingConfig: {
+          singleLineBreaks: false,
+          codeSyntaxHighlighting: true,
+        },
+        maxHeight: "550px",
+        minHeight: "450px",
+        spellChecker: false,
+        placeholder: "Type Markdown text directly...",
+        status: ["lines", "words", "cursor"],
+      });
+    }
+
+    function consoleApp() {
+      return {
+        activeTab: 'dashboard',
+        environments: [],
+        engagements: [],
+        skillsCatalog: [],
+        auditLogs: [],
+        all_possible_phases: ['discovery', 'ad-enumeration', 'privesc', 'credaccess', 'lateral', 'persistence', 'defevasion', 'impact'],
+        submitting: false,
+        saving: false,
+        loadingFile: false,
+
+        // Skill editing states
+        selectedSkill: 'discovering-environment',
+        selectedFileType: 'skill',
+
+        // Forms
+        form: {
+          environment: '',
+          platform: 'windows',
+          max_iterations: 20,
+          dry_run: true,
+          phases: []
+        },
+        editorForm: {
+          username: '',
+          change_summary: ''
+        },
+
+        // Toast notifications
+        toast: {
+          show: false,
+          type: 'success',
+          message: ''
+        },
+
+        // Modal logs
+        logsModal: {
+          show: false,
+          runId: '',
+          lines: []
+        },
+
+        init() {
+          this.fetchEnvironments();
+          this.fetchEngagements();
+          this.fetchSkills();
+          this.fetchAuditLogs();
+          
+          // Poll running engagements every 5 seconds
+          setInterval(() => {
+            if (this.activeTab === 'dashboard') {
+              this.fetchEngagements();
+            }
+          }, 5000);
+
+          // Initialize markdown editor on first tick
+          setTimeout(() => {
+            this.fetchSkillFile();
+          }, 200);
+        },
+
+        switchTab(tab) {
+          this.activeTab = tab;
+          if (tab === 'editor' && !easyMDE) {
+            this.fetchSkillFile();
+          } else if (tab === 'audits') {
+            this.fetchAuditLogs();
+          } else if (tab === 'dashboard') {
+            this.fetchEngagements();
+          }
+        },
+
+        triggerToast(type, msg) {
+          this.toast.type = type;
+          this.toast.message = msg;
+          this.toast.show = true;
+          setTimeout(() => {
+            this.toast.show = false;
+          }, 4500);
+        },
+
+        formatDate(isoString) {
+          if (!isoString) return '-';
+          try {
+            const date = new Date(isoString);
+            return date.toLocaleString();
+          } catch(e) {
+            return isoString;
+          }
+        },
+
+        async fetchEnvironments() {
+          try {
+            const r = await fetch('/environments');
+            if (r.ok) {
+              this.environments = await r.json();
+            }
+          } catch(e) {
+            console.error('Failed to load environments:', e);
+          }
+        },
+
+        async fetchEngagements() {
+          try {
+            const r = await fetch('/engagements');
+            if (r.ok) {
+              const data = await r.json();
+              // Sort most recent first
+              this.engagements = data.sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+            }
+          } catch(e) {
+            console.error('Failed to load engagements:', e);
+          }
+        },
+
+        async fetchSkills() {
+          try {
+            const r = await fetch('/api/ui/skills');
+            if (r.ok) {
+              this.skillsCatalog = await r.json();
+            }
+          } catch(e) {
+            console.error('Failed to load skills:', e);
+          }
+        },
+
+        async fetchAuditLogs() {
+          try {
+            const r = await fetch('/api/ui/audit-log');
+            if (r.ok) {
+              this.auditLogs = await r.json();
+            }
+          } catch(e) {
+            console.error('Failed to load audit logs:', e);
+          }
+        },
+
+        async fetchSkillFile() {
+          if (!this.selectedSkill) return;
+          this.loadingFile = true;
+          try {
+            const r = await fetch(`/api/ui/skills/${this.selectedSkill}/files/${this.selectedFileType}`);
+            if (r.ok) {
+              const data = await r.json();
+              initEasyMDE(data.content || '');
+            } else {
+              initEasyMDE('');
+            }
+          } catch(e) {
+            this.triggerToast('error', 'Failed to fetch playbook content.');
+          } finally {
+            this.loadingFile = false;
+          }
+        },
+
+        selectSkill(name) {
+          this.selectedSkill = name;
+          this.fetchSkillFile();
+        },
+
+        selectFile(type) {
+          this.selectedFileType = type;
+          this.fetchSkillFile();
+        },
+
+        async saveSkillFile() {
+          if (!this.editorForm.username.trim()) {
+            this.triggerToast('error', 'Please input your Username/Handle to commit edits.');
+            return;
+          }
+          if (!this.editorForm.change_summary.trim()) {
+            this.triggerToast('error', 'Please fill in a concise summary describing your changes.');
+            return;
+          }
+
+          this.saving = true;
+          const updatedContent = easyMDE.value();
+
+          try {
+            const r = await fetch(`/api/ui/skills/${this.selectedSkill}/files/${this.selectedFileType}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                username: this.editorForm.username,
+                content: updatedContent,
+                change_summary: this.editorForm.change_summary
+              })
+            });
+
+            if (r.ok) {
+              this.triggerToast('success', 'Playbook saved and committed to audit log successfully.');
+              this.editorForm.change_summary = ''; // clear description
+              this.fetchAuditLogs();
+            } else {
+              const err = await r.json();
+              this.triggerToast('error', `Failed: ${err.detail || 'API error'}`);
+            }
+          } catch(e) {
+            this.triggerToast('error', 'Network failure during save.');
+          } finally {
+            this.saving = false;
+          }
+        },
+
+        async triggerEngagement() {
+          this.submitting = true;
+          const payload = {
+            max_iterations: parseInt(this.form.max_iterations) || 20,
+            dry_run: this.form.dry_run,
+            target: { platform: this.form.platform }
+          };
+
+          if (this.form.phases.length > 0) {
+            payload.phases = this.form.phases;
+          }
+
+          if (this.form.environment) {
+            payload.environment = { id: this.form.environment };
+          }
+
+          try {
+            const r = await fetch('/engagements', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            if (r.ok) {
+              const res = await r.json();
+              this.triggerToast('success', `Campaign ${res.run_id.substring(0, 8)} started successfully.`);
+              this.fetchEngagements();
+            } else {
+              const err = await r.json();
+              this.triggerToast('error', `Launch failed: ${err.detail || 'Check target status'}`);
+            }
+          } catch(e) {
+            this.triggerToast('error', 'Network failure triggering campaign.');
+          } finally {
+            this.submitting = false;
+          }
+        },
+
+        async viewEngagementLogs(runId) {
+          this.logsModal.runId = runId;
+          this.logsModal.lines = [];
+          this.logsModal.show = true;
+          this.fetchEngagementLogs(runId);
+        },
+
+        async fetchEngagementLogs(runId) {
+          try {
+            const r = await fetch(`/engagements/${runId}/log`);
+            if (r.ok) {
+              const data = await r.json();
+              this.logsModal.lines = data.lines || [];
+              
+              // Smooth scroll modal terminal to the bottom after rendering
+              setTimeout(() => {
+                const term = document.getElementById('modal-terminal-output');
+                if (term) term.scrollTop = term.scrollHeight;
+              }, 100);
+            }
+          } catch(e) {
+            console.error('Failed to load engagement logs:', e);
+          }
+        }
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "adversary_id": "6929a6bc-7291-4f0a-b313-3dc2cff4ac91",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:55:16.401364+00:00",
+  "adversary": {
+    "name": "APT Credential Access and GPO Auditor",
+    "description": "Emulates an advanced threat group executing domain roasting, local registry credential extraction, LSASS memory collection, and GPO exploitation auditing.",
+    "profile": null,
+    "execution_strategy": null,
+    "requires_approval": false,
+    "is_tested": false,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "782e8eeb-4253-4838-9d50-6cf14d2339ca",
+    "9f50550e-f2fd-43a7-baa9-0c06cc019196",
+    "984838cc-e8cc-4492-84a1-06bb4a3ed07a",
+    "6de10deb-3445-48f9-be65-04db9fd551f4"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "ability_id": "b4171b4d-9857-4269-bb61-cb657e3bcb34",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:05:49.900744+00:00",
+  "ability": {
+    "name": "Step 2 - Verify Nmap Presence",
+    "description": "Proves whether Nmap is available on the path.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1518",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "software-check"
+    ],
+    "created_by": "ai",
+    "engagement_id": "37f14cc91cec41b3a0c3afeb9edddfa6"
+  },
+  "stages": [
+    {
+      "stage_name": "Check Nmap",
+      "stage_order": 3,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $v = nmap --version 2>&1 | Select-String \"Nmap\"; if ($v) { Write-Output \"NMAP_AVAILABLE: true\" } else { Write-Output \"NMAP_AVAILABLE: false\" } } catch { Write-Output \"NMAP_AVAILABLE: false\" }) | Tee-Object -FilePath $d\\step2.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Assesses presence of standard scanning tools to pick the most optimal scan route.",
+  "provider": "specialist",
+  "cited_urls": []
+}

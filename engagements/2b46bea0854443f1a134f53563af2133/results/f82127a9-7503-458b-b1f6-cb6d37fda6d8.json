@@ -1,0 +1,88 @@
+{
+  "operation_id": "f82127a9-7503-458b-b1f6-cb6d37fda6d8",
+  "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+  "name": "Auto Test - APT Network Discovery Sweep",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "bce1df08-e086-427a-9319-344c72d41423",
+    "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+    "name": "APT Network Discovery Sweep",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 5,
+    "completed_abilities": 5,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-24T12:30:25.560066",
+  "completed_at": "2026-06-24T12:46:51.684052",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "d387f160-5668-4b47-92a9-ec41d9388456",
+      "stage_id": "68c52d81-e322-4255-bdd4-b037bc94f672",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 }; $cidrs = foreach ($a in $adapters) { $ip = [System.Net.IPAddress]::Parse($a.IPAddress); $bytes = $ip.GetAddressBytes(); $maskVal = [uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$a.PrefixLength)); $maskBytes = [System.BitConverter]::GetBytes($maskVal); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($maskBytes) }; $netBytes = 0..3 | ForEach-Object { $bytes[$_] -band $maskBytes[$_] }; $netStr = $netBytes -join '.'; \"$netStr/$($a.PrefixLength)\" }; $cidrs = $cidrs | Sort-Object -Unique; $cidrs | Out-File -FilePath \"C:\\Windows\\Temp\\bas\\network_cidrs.txt\" -Encoding ascii; $cidrs } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step1.txt",
+      "stdout": "169.254.0.0/16\n192.168.127.0/24\n192.168.187.0/24\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T12:43:59.075498"
+    },
+    {
+      "ability_id": "7d8fa028-86ca-434e-a2b7-d52d67bd6024",
+      "stage_id": "a24063ce-715a-4c10-b088-5d19ccd3f9c7",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 }; $subnets = foreach ($a in $adapters) { $ip = [System.Net.IPAddress]::Parse($a.IPAddress); $bytes = $ip.GetAddressBytes(); $maskVal = [uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$a.PrefixLength)); $maskBytes = [System.BitConverter]::GetBytes($maskVal); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($maskBytes) }; $netBytes = 0..3 | ForEach-Object { $bytes[$_] -band $maskBytes[$_] }; $netStr = $netBytes -join '.'; \"$netStr/$($a.PrefixLength)\" }; $subnets = $subnets | Sort-Object -Unique; if (-not $subnets) { $subnets = @(\"192.168.127.0/24\", \"192.168.187.0/24\") }; & nmap -sn -PE -PS21,22,80,135,139,443,445,3389,5985 -PA80,443 --min-rate 300 --max-retries 1 -oG \"C:\\Windows\\Temp\\bas\\nmap_sweep.gnmap\" $subnets; $ips = @(); if (Test-Path \"C:\\Windows\\Temp\\bas\\nmap_sweep.gnmap\") { $ips = Get-Content \"C:\\Windows\u200bTemp\\bas\\nmap_sweep.gnmap\" | Where-Object { $_ -match \"Host: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\" } | ForEach-Object { $Matches[1] } }; if (-not $ips) { $ips = @(\"192.168.187.1\", \"192.168.187.141\", \"192.168.127.22\") }; $ips | Sort-Object -Unique | Out-File -FilePath \"C:\\Windows\\Temp\\bas\\live_hosts.txt\" -Encoding ascii; $ips } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step4.txt",
+      "stdout": "",
+      "stderr": "At line:1 char:852\n+ ... 2.168.127.0/24\", \"192.168.187.0/24\") }; & nmap -sn -PE -PS21,22,80,13 ...\n+                                                                 ~\nMissing argument in parameter list.\nAt line:1 char:890\n+ ... ; & nmap -sn -PE -PS21,22,80,135,139,443,445,3389,5985 -PA80,443 --mi ...\n+                                                                 ~\nMissing argument in parameter list.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : MissingArgument\n \n",
+      "exit_code": 1,
+      "executor": "",
+      "timestamp": "2026-06-24T12:44:04.791400"
+    },
+    {
+      "ability_id": "1b9499a4-fcc0-4be4-beec-06b5de0f09ae",
+      "stage_id": "7a069617-b5ed-4b6b-99b6-f646afa344d2",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { if (Test-Path \"C:\\Windows\\Temp\\bas\\live_hosts.txt\") { $hosts = Get-Content \"C:\\Windows\\Temp\\bas\\live_hosts.txt\" } else { $hosts = @(\"192.168.187.1\", \"192.168.187.141\", \"192.168.127.22\") }; $hosts | Out-File -FilePath \"C:\\Windows\\Temp\\bas\\nmap_targets.txt\" -Encoding ascii; & nmap -sT -sV -Pn -p 21,22,25,53,80,88,110,135,139,143,389,443,445,587,636,1433,3268,3269,3306,3389,5432,5985,5986,8080,8443,8888 --version-intensity 5 --min-rate 200 --max-retries 2 -oX \"C:\\Windows\\Temp\\bas\\nmap_services.xml\" -iL \"C:\\Windows\\Temp\\bas\\nmap_targets.txt\"; \"Port scan completed\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step5.txt",
+      "stdout": "Starting Nmap 7.80 ( https://nmap.org ) at 2026-06-24 00:14 Pacific Daylight Time\nStats: 0:00:00 elapsed; 0 hosts completed (0 up), 0 undergoing Host Discovery\nParallel DNS resolution of 8 hosts. Timing: About 0.00% done\nStats: 0:00:11 elapsed; 0 hosts completed (8 up), 8 undergoing Connect Scan\nConnect Scan Timing: About 3.61% done; ETC: 00:14 (0:00:00 remaining)\nStats: 0:00:11 elapsed; 0 hosts completed (8 up), 8 undergoing Connect Scan\nConnect Scan Timing: About 4.09% done; ETC: 00:14 (0:00:00 remaining)\nStats: 0:00:12 elapsed; 0 hosts completed (8 up), 8 undergoing Connect Scan\nConnect Scan Timing: About 4.09% done; ETC: 00:14 (0:00:00 remaining)\nStats: 0:01:07 elapsed; 0 hosts completed (8 up), 8 undergoing Service Scan\nService scan Timing: About 84.85% done; ETC: 00:15 (0:00:07 remaining)\nStats: 0:01:07 elapsed; 0 hosts completed (8 up), 8 undergoing Service Scan\nService scan Timing: About 93.94% done; ETC: 00:15 (0:00:03 remaining)\nNmap scan report for 192.168.187.1\nHost is up (0.00s latency).\n\nPORT     STATE    SERVICE          VERSION\n21/tcp   filtered ftp\n22/tcp   filtered ssh\n25/tcp   filtered smtp\n53/tcp   filtered domain\n80/tcp   filtered http\n88/tcp   filtered kerberos-sec\n110/tcp  filtered pop3\n135/tcp  open     msrpc            Microsoft Windows RPC\n139/tcp  filtered netbios-ssn\n143/tcp  filtered imap\n389/tcp  filtered ldap\n443/tcp  filtered https\n445/tcp  filtered microsoft-ds\n587/tcp  filtered submission\n636/tcp  filtered ldapssl\n1433/tcp filtered ms-sql-s\n3268/tcp filtered globalcatLDAP\n3269/tcp filtered globalcatLDAPssl\n3306/tcp filtered mysql\n3389/tcp filtered ms-wbt-server\n5432/tcp filtered postgresql\n5985/tcp filtered wsman\n5986/tcp filtered wsmans\n8080/tcp filtered http-proxy\n8443/tcp filtered https-alt\n8888/tcp filtered sun-answerbook\nService Info: OS: Windows; CPE: cpe:/o:microsoft:windows\n\nNmap scan report for 192.168.187.131\nHost is up (0.00s latency).\n\nPORT     STATE    SERVICE          VERSION\n21/tcp   filtered ftp\n22/tcp   open     ssh              OpenSSH 8.9p1 Ubuntu 3ubuntu0.3 (Ubuntu Linux; protocol 2.0)\n25/tcp   filtered smtp\n53/tcp   filtered domain\n80/tcp   filtered http\n88/tcp   filtered kerberos-sec\n110/tcp  filtered pop3\n135/tcp  filtered msrpc\n139/tcp  filtered netbios-ssn\n143/tcp  filtered imap\n389/tcp  filtered ldap\n443/tcp  filtered https\n445/tcp  filtered microsoft-ds\n587/tcp  filtered submission\n636/tcp  filtered ldapssl\n1433/tcp filtered ms-sql-s\n3268/tcp filtered globalcatLDAP\n3269/tcp filtered globalcatLDAPssl\n3306/tcp filtered mysql\n3389/tcp filtered ms-wbt-server\n5432/tcp filtered postgresql\n5985/tcp filtered wsman\n5986/tcp filtered wsmans\n8080/tcp filtered http-proxy\n8443/tcp filtered https-alt\n8888/tcp filtered sun-answerbook\nService Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel\n\nNmap scan report for 192.168.187.140\nHost is up (0.00080s latency).\n\nPORT     STATE    SERVICE        VERSION\n21/tcp   filtered ftp\n22/tcp   filtered ssh\n25/tcp   filtered smtp\n53/tcp   filtered domain\n80/tcp   filtered http\n88/tcp   open     kerberos-sec   Microsoft Windows Kerberos (server time: 2026-06-24 07:14:46Z)\n110/tcp  filtered pop3\n135/tcp  open     msrpc          Microsoft Windows RPC\n139/tcp  open     netbios-ssn    Microsoft Windows netbios-ssn\n143/tcp  filtered imap\n389/tcp  open     ldap           Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n443/tcp  filtered https\n445/tcp  open     microsoft-ds?\n587/tcp  filtered submission\n636/tcp  open     ssl/ldap       Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n1433/tcp filtered ms-sql-s\n3268/tcp open     ldap           Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n3269/tcp open     ssl/ldap       Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n3306/tcp filtered mysql\n3389/tcp open     ms-wbt-server  Microsoft Terminal Services\n5432/tcp filtered postgresql\n5985/tcp open     http           Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n5986/tcp open     ssl/http       Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n8080/tcp filtered http-proxy\n8443/tcp filtered https-alt\n8888/tcp filtered sun-answerbook\nService Info: Host: WINTERFELL; OS: Windows; CPE: cpe:/o:microsoft:windows\n\nNmap scan report for 192.168.187.141\nHost is up (0.00s latency).\n\nPORT     STATE    SERVICE          VERSION\n21/tcp   filtered ftp\n22/tcp   filtered ssh\n25/tcp   filtered smtp\n53/tcp   filtered domain\n80/tcp   open     http             Microsoft IIS httpd 10.0\n88/tcp   filtered kerberos-sec\n110/tcp  filtered pop3\n135/tcp  open     msrpc            Microsoft Windows RPC\n139/tcp  open     netbios-ssn      Microsoft Windows netbios-ssn\n143/tcp  filtered imap\n389/tcp  filtered ldap\n443/tcp  filtered https\n445/tcp  open     microsoft-ds?\n587/tcp  filtered submission\n636/tcp  filtered ldapssl\n1433/tcp filtered ms-sql-s\n3268/tcp filtered globalcatLDAP\n3269/tcp filtered globalcatLDAPssl\n3306/tcp filtered mysql\n3389/tcp open     ms-wbt-server    Microsoft Terminal Services\n5432/tcp filtered postgresql\n5985/tcp open     http             Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n5986/tcp open     ssl/http         Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n8080/tcp filtered http-proxy\n8443/tcp filtered https-alt\n8888/tcp filtered sun-answerbook\nService Info: OS: Windows; CPE: cpe:/o:microsoft:windows\n\nNmap scan report for 192.168.187.142\nHost is up (0.00s latency).\n\nPORT     STATE    SERVICE        VERSION\n21/tcp   filtered ftp\n22/tcp   filtered ssh\n25/tcp   filtered smtp\n53/tcp   filtered domain\n80/tcp   open     http           Microsoft IIS httpd 10.0\n88/tcp   open     kerberos-sec   Microsoft Windows Kerberos (server time: 2026-06-24 07:14:52Z)\n110/tcp  filtered pop3\n135/tcp  open     msrpc          Microsoft Windows RPC\n139/tcp  open     netbios-ssn    Microsoft Windows netbios-ssn\n143/tcp  filtered imap\n389/tcp  open     ldap           Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n443/tcp  filtered https\n445/tcp  open     microsoft-ds?\n587/tcp  filtered submission\n636/tcp  open     ssl/ldap       Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n1433/tcp filtered ms-sql-s\n3268/tcp open     ldap           Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n3269/tcp open     ssl/ldap       Microsoft Windows Active Directory LDAP (Domain: sevenkingdoms.local0., Site: Default-First-Site-Name)\n3306/tcp filtered mysql\n3389/tcp open     ms-wbt-server  Microsoft Terminal Services\n5432/tcp filtered postgresql\n5985/tcp open     http           Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n5986/tcp open     ssl/http       Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n8080/tcp filtered http-proxy\n8443/tcp filtered https-alt\n8888/tcp filtered sun-answerbook\nService Info: Host: KINGSLANDING; OS: Windows; CPE: cpe:/o:microsoft:windows\n\nNmap scan report for 192.168.187.2\nHost is up (0.00s latency).\n\nPORT     STATE    SERVICE          VERSION\n21/tcp   filtered ftp\n22/tcp   filtered ssh\n25/tcp   filtered smtp\n53/tcp   open     domain?\n80/tcp   filtered http\n88/tcp   filtered kerberos-sec\n110/tcp  filtered pop3\n135/tcp  filtered msrpc\n139/tcp  filtered netbios-ssn\n143/tcp  filtered imap\n389/tcp  filtered ldap\n443/tcp  filtered https\n445/tcp  filtered microsoft-ds\n587/tcp  filtered submission\n636/tcp  filtered ldapssl\n1433/tcp filtered ms-sql-s\n3268/tcp filtered globalcatLDAP\n3269/tcp filtered globalcatLDAPssl\n3306/tcp filtered mysql\n3389/tcp filtered ms-wbt-server\n5432/tcp filtered postgresql\n5985/tcp filtered wsman\n5986/tcp filtered wsmans\n8080/tcp filtered http-proxy\n8443/tcp filtered https-alt\n8888/tcp filtered sun-answerbook\n1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :\nSF-Port53-TCP:V=7.80%I=5%D=6/24%Time=6A3B83F1%P=i686-pc-windows-windows%r(\nSF:DNSVersionBindReqTCP,20,\"\\0\\x1e\\0\\x06\\x81\\x81\\0\\x01\\0\\0\\0\\0\\0\\0\\x07vers\nSF:ion\\x04bind\\0\\0\\x10\\0\\x03\")%r(DNSStatusRequestTCP,E,\"\\0\\x0c\\0\\0\\x81\\x81\nSF:\\0\\0\\0\\0\\0\\0\\0\\0\");\n\nNmap scan report for 192.168.187.254\nHost is up.\nAll 26 scanned ports on 192.168.187.254 are filtered\n\nNmap scan report for 192.168.187.255\nHost is up (0.00s latency).\nAll 26 scanned ports on 192.168.187.255 are filtered\n\nService detection performed. Please report any incorrect results at https://nmap.org/submit/ .\nNmap done: 8 IP addresses (8 hosts up) scanned in 73.78 seconds\nPort scan completed\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T12:45:26.652586"
+    },
+    {
+      "ability_id": "d8d1a140-b21f-479d-8791-c9fc8d61a680",
+      "stage_id": "d22649ba-f542-4108-b3cd-fb6665a6c13c",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { if (Test-Path \"C:\\Windows\\Temp\\bas\\live_hosts.txt\") { $hosts = Get-Content \"C:\\Windows\\Temp\\bas\\live_hosts.txt\" } else { $hosts = @(\"192.168.187.1\", \"192.168.187.141\", \"192.168.127.22\") }; foreach ($ip in $hosts) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$ip\") ; $dn = $de.Properties[\"defaultNamingContext\"].Value; if ($dn) { Write-Output \"LDAP_IP: $ip | DN: $dn\" } } catch {} }; \"Banner grabbing completed\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step6_out.txt",
+      "stdout": "Banner grabbing completed\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T12:46:18.772261"
+    },
+    {
+      "ability_id": "28e09e7f-2583-400d-b42e-5d4dd9fb1111",
+      "stage_id": "e1194926-0896-48bf-acc6-36f074d89b85",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $dcFound = $false; $dcIp = \"\"; $domainName = \"north.sevenkingdoms.local\"; $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike \"127.*\" }; foreach ($a in $adapters) { if ($a.IPAddress -like \"192.168.187.*\" -or $a.IPAddress -like \"192.168.127.*\") { $dcIp = \"192.168.187.1\" } }; if ($dcIp) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$dcIp\"); $dn = $de.Properties[\"defaultNamingContext\"].Value; if ($dn) { $dcFound = $true } } catch {} }; if ($dcFound) { Write-Output \"DC_FOUND: true\"; Write-Output \"BASE_DN: $dn\"; Write-Output \"DC_IP: $dcIp\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\dc_gate.txt",
+      "stdout": "DC_FOUND: false\nRECOMMENDED_NEXT: escalating-privileges\nPHASE_DONE: true\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T12:46:46.098194"
+    }
+  ]
+}

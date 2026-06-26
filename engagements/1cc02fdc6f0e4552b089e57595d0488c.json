@@ -1,0 +1,40 @@
+{
+  "run_id": "1cc02fdc6f0e4552b089e57595d0488c",
+  "status": "failed",
+  "started_at": "2026-06-24T12:34:26.222696+00:00",
+  "finished_at": "2026-06-24T12:34:27.522381+00:00",
+  "request": {
+    "phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "environment": null,
+    "target": {
+      "platform": "windows"
+    },
+    "safety": {
+      "acks": [],
+      "simulations": []
+    },
+    "max_iterations": 20,
+    "dry_run": false
+  },
+  "state": null,
+  "error": "FootholdResolutionError: no enabled agents in environment 'TEST-ENV1' (613648f4-a981-4e19-9f09-fdb1a5a4386c); saw 0 agent record(s)\nTraceback (most recent call last):\n  File \"/app/src/bas/worker.py\", line 575, in _run_engagement_inner\n    foothold = resolve_foothold(\n               ^^^^^^^^^^^^^^^^^\n  File \"/app/src/bas/foothold.py\", line 72, in resolve_foothold\n    raise FootholdResolutionError(\nbas.foothold.FootholdResolutionError: no enabled agents in environment 'TEST-ENV1' (613648f4-a981-4e19-9f09-fdb1a5a4386c); saw 0 agent record(s)\n",
+  "skill_order": [
+    "discovery",
+    "ad-enumeration",
+    "privesc",
+    "credaccess",
+    "lateral",
+    "persistence",
+    "defevasion",
+    "impact"
+  ]
+}

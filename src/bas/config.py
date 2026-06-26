@@ -111,8 +111,8 @@ class LlmConfig(StrictModel):
     model: str = "gemini-3.5-flash"
     classifier_model: str = "gemini-3.5-flash"
     api_key_env: str = "GEMINI_API_KEY"
-    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    thinking_level: str = Field(default="medium", description="Thinking level: off, low, medium, high")
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="Leave None to use Gemini 3.x defaults")
+    thinking_level: str = Field(default="high", description="Thinking level: off, low, medium, high")
     grounding: GroundingConfig = Field(default_factory=GroundingConfig)
 
     @field_validator("provider")
@@ -138,10 +138,24 @@ class RunConfig(StrictModel):
 class ExecutionConfig(StrictModel):
     """Controls graph checkpointing and result-wait behaviour."""
 
-    result_wait_timeout: int = Field(default=600, ge=0, description="Seconds before timeout-resume fires.")
+    result_wait_timeout: int = Field(default=6000, ge=0, description="Soft wait window (s). Past this an engagement is 'overdue' but stays parked — late results still resume it. Backend commands can run long.")
+    result_hard_timeout: int = Field(default=0, ge=0, description="Hard cap (s) after which the scanner force-abandons a still-waiting engagement (dead-agent backstop). 0 = no hard cap (wait indefinitely for results / manual cancel). Should be > result_wait_timeout.")
+    result_poll_enabled: bool = Field(default=True, description="Pull results by polling GET /operations/{id} instead of only waiting for the /results webhook.")
+    result_poll_interval: int = Field(default=40, ge=30, description="Seconds between operation-detail polls (default 7 min).")
     max_result_size_mb: int = Field(default=10, ge=1)
-    checkpointer: Literal["memory", "sqlite"] = "memory"
+    # Default to sqlite so engagements paused at `interrupt("awaiting_results")`
+    # survive a process restart. The in-memory saver orphans any paused run.
+    checkpointer: Literal["memory", "sqlite"] = "sqlite"
     checkpoint_db: str = "runs/checkpoints.db"
+
+
+class KaliConfig(StrictModel):
+    """Connection settings for the Kali toolbox sidecar."""
+
+    base_url: str = "http://kali-toolbox:9000"
+    timeout: float = Field(default=300.0, gt=0)
+    connect_timeout: float = Field(default=10.0, gt=0)
+    enabled: bool = False
 
 
 # ----------------------------------------------------------------------------
@@ -154,6 +168,7 @@ class AppConfig(StrictModel):
     llm: LlmConfig = Field(default_factory=LlmConfig)
     run: RunConfig = Field(default_factory=RunConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    kali: KaliConfig = Field(default_factory=KaliConfig)
 
     # Source path (debug/auditing). Excluded from `extra=forbid` because it's set
     # post-construction via `model_copy(update=...)`.

@@ -1,0 +1,18 @@
+{
+  "adversary_id": "47434e1e-b065-49f4-9020-c3752cac96b9",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-23T11:14:36.478674+00:00",
+  "adversary": {
+    "name": "Security Hardening Specialist",
+    "description": "A profile focused on verifying and auditing credential protection mechanisms without executing hazardous, high-risk, or offensive credential extraction actions.",
+    "profile": "Security Auditor",
+    "execution_strategy": "Defensive Verification",
+    "requires_approval": true,
+    "is_tested": false,
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "linked_ability_ids": [
+    "085a0222-a4ec-4632-9551-ca2249c07511"
+  ]
+}

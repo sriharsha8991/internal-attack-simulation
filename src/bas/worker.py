@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
+from datetime import datetime, timezone
 from typing import Any
 
 from .bootstrap import (
@@ -22,6 +23,27 @@ from .phases import known_phases, resolve_phases_to_skills
 from .schemas import EngagementCreateRequest
 
 logger = logging.getLogger(__name__)
+
+
+def _kali_sidecar_context() -> dict[str, Any]:
+    """Return planner-visible Kali sidecar status without making it a BAS agent."""
+    cfg = _state.get("cfg")
+    kali = _state.get("kali")
+    enabled = bool(getattr(getattr(cfg, "kali", None), "enabled", False))
+    base_url = getattr(getattr(cfg, "kali", None), "base_url", None)
+    return {
+        "enabled": enabled,
+        "healthy": bool(kali and kali.is_healthy()),
+        "base_url": base_url,
+        "shared_dir": "/data/kali-shared",
+        "capabilities": [
+            "exec_command",
+            "upload",
+            "download",
+            "parse_keys",
+            "bloodhound_ingest",
+        ],
+    }
 
 # ---------------------------------------------------------------------------
 # Per-engagement lock to prevent concurrent graph invocations on the same
@@ -41,6 +63,142 @@ def _get_engagement_lock(engagement_id: str) -> threading.Lock:
             lock = threading.Lock()
             _engagement_locks[engagement_id] = lock
         return lock
+
+
+# ---------------------------------------------------------------------------
+# Timeout scanner — two-tier (soft = recoverable, hard = abandon)
+#
+# Lives here (not in api.py) because it is engagement business logic: it shares
+# the per-engagement lock and the compiled graph with the webhook-resume path.
+# api.py only wires it into the startup hook.
+# ---------------------------------------------------------------------------
+
+# Engagements we've already logged an "overdue" warning for (soft timeout
+# passed but still parked). Keyed by (engagement_id, awaiting_since) so a fresh
+# wait after a resume warns again. Cleaned up on hard-abandon.
+_overdue_warned: set[tuple[str, str]] = set()
+
+
+def _start_timeout_scanner(soft_timeout: int, hard_timeout: int) -> None:
+    """Periodically handle engagements stuck in awaiting_results.
+
+    Two tiers:
+      * soft_timeout  — past this the engagement is 'overdue'; we keep it parked
+        so a late result still resumes it (work is never wasted).
+      * hard_timeout  — only past this do we force the timeout-resume (advance/
+        retry), the backstop for genuinely dead agents. 0 disables it.
+    """
+    import time
+
+    def _scan() -> None:
+        while True:
+            time.sleep(60)  # check every minute
+            try:
+                _expire_stale_engagements(soft_timeout, hard_timeout)
+            except Exception:  # noqa: BLE001
+                logger.exception("[timeout-scanner] error during scan")
+
+    t = threading.Thread(target=_scan, daemon=True, name="timeout-scanner")
+    t.start()
+    logger.info(
+        "[boot] timeout scanner started (soft=%ds, hard=%s)",
+        soft_timeout,
+        f"{hard_timeout}s" if hard_timeout else "disabled",
+    )
+
+
+def _expire_stale_engagements(soft_timeout: int, hard_timeout: int) -> None:
+    """Force-resume only engagements past the HARD cap; keep overdue ones parked.
+
+    Between the soft and hard timeouts the engagement stays in awaiting_results
+    with its checkpoint and pending_operation_id intact, so a late result POSTed
+    to /results resumes it normally instead of being discarded.
+    """
+    from langgraph.types import Command
+
+    store: RunStore = _state["store"]
+    compiled = _get_compiled_graph()
+    now = datetime.now(timezone.utc)
+
+    for record in store.list_all():
+        if record.get("status") != "awaiting_results":
+            continue
+        awaiting_since = record.get("awaiting_since")
+        if not awaiting_since:
+            continue
+        elapsed = (now - datetime.fromisoformat(awaiting_since)).total_seconds()
+
+        engagement_id = record["run_id"]
+
+        # Within the recoverable window (under hard cap, or hard cap disabled):
+        # leave it parked so a late result still resumes it. Warn once if overdue.
+        if not hard_timeout or elapsed <= hard_timeout:
+            if elapsed > soft_timeout:
+                warn_key = (engagement_id, str(awaiting_since))
+                if warn_key not in _overdue_warned:
+                    _overdue_warned.add(warn_key)
+                    logger.warning(
+                        "[timeout-scanner] engagement %s overdue (%ds > soft %ds) "
+                        "— still parked, will honour a late result%s",
+                        engagement_id,
+                        int(elapsed),
+                        soft_timeout,
+                        f" until hard cap {hard_timeout}s" if hard_timeout else "",
+                    )
+            continue
+
+        # Past the hard cap: force-abandon — dead-agent backstop.
+        _overdue_warned.discard((engagement_id, str(awaiting_since)))
+        logger.warning(
+            "[timeout-scanner] hard-expiring engagement %s after %ds (hard cap %ds)",
+            engagement_id,
+            int(elapsed),
+            hard_timeout,
+        )
+
+        # Acquire per-engagement lock to prevent racing with _resume_graph.
+        lock = _get_engagement_lock(engagement_id)
+        if not lock.acquire(timeout=10):
+            logger.info(
+                "[timeout-scanner] engagement %s locked by resume; skipping this cycle",
+                engagement_id,
+            )
+            continue
+
+        try:
+            # Re-read under lock — a webhook resume may have already changed status.
+            fresh = store.get(engagement_id)
+            if not fresh or fresh.get("status") != "awaiting_results":
+                continue
+
+            from langgraph.errors import GraphInterrupt
+
+            fresh["status"] = "running"
+            fresh.pop("awaiting_since", None)
+            store.save(fresh)
+
+            compiled.invoke(
+                Command(resume={"timeout": True, "engagement_id": engagement_id}),
+                config={"configurable": {"thread_id": engagement_id}},
+            )
+            fresh["status"] = "completed"
+            fresh["finished_at"] = now_iso()
+            store.save(fresh)
+        except GraphInterrupt:
+            fresh["status"] = "awaiting_results"
+            fresh["awaiting_since"] = now_iso()
+            store.save(fresh)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "[timeout-scanner] failed to resume engagement %s",
+                engagement_id,
+            )
+            fresh["status"] = "failed"
+            fresh["error"] = "timeout-scanner resume failed"
+            fresh["finished_at"] = now_iso()
+            store.save(fresh)
+        finally:
+            lock.release()
 
 
 def _release_engagement_lock(engagement_id: str) -> None:
@@ -82,7 +240,7 @@ def _notify_completion(engagement_id: str, status: str) -> None:
 class _DryRunStubPlanner:
     """Offline plan generator used only when dry_run=True and no LLM key."""
 
-    def plan(self, skill, state):  # type: ignore[override]
+    def plan(self, skill, state, *, feedback: str | None = None):  # type: ignore[override]
         from .agents import SpecialistPlan
         from .models import (
             AbilityCreate,
@@ -133,6 +291,210 @@ class _DryRunStubPlanner:
 
 
 # ---------------------------------------------------------------------------
+# Result poller — pull results via GET /operations instead of waiting for the
+# /results webhook. Started when an engagement enters awaiting_results; resumes
+# the graph with the real operation detail the moment it completes. Coexists
+# with the webhook (both call _resume_graph, which is idempotent) and the
+# timeout scanner (the dead-agent backstop).
+# ---------------------------------------------------------------------------
+
+_active_pollers: set[str] = set()
+_active_pollers_guard = threading.Lock()
+
+
+def _current_phase_adversary(engagement_id: str) -> tuple[str | None, str | None]:
+    """Read (current_phase, adversary_id) for the paused engagement from the
+    graph checkpoint — that's where push recorded the phase_asset_map."""
+    try:
+        compiled = _get_compiled_graph()
+        snap = compiled.get_state({"configurable": {"thread_id": engagement_id}})
+        values = getattr(snap, "values", None) or {}
+        phase = values.get("current_phase")
+        asset_map = (values.get("phase_asset_map") or {}).get(phase, {})
+        return phase, asset_map.get("adversary_id")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[poller] could not read state for %s: %s", engagement_id, exc)
+        return None, None
+
+
+def _discover_operation_id(
+    bas: Any, adversary_id: str, engagement_id: str | None = None
+) -> str | None:
+    """Find the backend operation for our adversary via GET /operations.
+
+    Matches on the nested ``adversary.adversary_id``. When ``engagement_id`` is
+    known it is used to refine/disambiguate (operations and adversaries both
+    carry an ``engagement_id``), comparing dash-insensitively since our run_id is
+    32-char hex while the backend may use the dashed UUID form.
+    """
+    try:
+        ops = bas.operations.list()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[poller] GET /operations failed: %s", exc)
+        return None
+
+    def _norm(s: Any) -> str:
+        return str(s or "").replace("-", "")
+
+    def _adv(o: dict) -> str:
+        # OperationSummary nests the adversary: {"adversary": {"adversary_id": ...}}.
+        # Fall back to a flat field for forward-compat.
+        adv = o.get("adversary")
+        if isinstance(adv, dict) and adv.get("adversary_id"):
+            return str(adv["adversary_id"])
+        return str(o.get("adversary_id") or o.get("adversaryId") or "")
+
+    def _eng(o: dict) -> str:
+        adv = o.get("adversary") if isinstance(o.get("adversary"), dict) else {}
+        return _norm(o.get("engagement_id") or adv.get("engagement_id"))
+
+    def _opid(o: dict) -> str | None:
+        return o.get("operation_id") or o.get("id") or o.get("operationId")
+
+    eng = _norm(engagement_id)
+    candidates = [o for o in ops if isinstance(o, dict) and _adv(o) == str(adversary_id)]
+    if eng:
+        if candidates:
+            # Among adversary matches, prefer ones that also match the engagement.
+            refined = [o for o in candidates if _eng(o) == eng]
+            if refined:
+                candidates = refined
+        else:
+            # No adversary match (e.g. list lags) — fall back to engagement match.
+            candidates = [o for o in ops if isinstance(o, dict) and _eng(o) == eng]
+    if not candidates:
+        return None
+    # Most recent first (started_at, falling back to completed_at).
+    candidates.sort(
+        key=lambda o: str(o.get("started_at") or o.get("completed_at") or ""),
+        reverse=True,
+    )
+    return _opid(candidates[0])
+
+
+def _start_result_poller(engagement_id: str) -> None:
+    """Spawn the background result poller for an engagement (idempotent)."""
+    cfg = _state.get("cfg")
+    if cfg is None or not cfg.execution.result_poll_enabled:
+        return
+    bas = _state.get("bas")
+    if bas is not None and getattr(bas, "dry_run", False):
+        return  # no real backend to poll in dry-run
+    with _active_pollers_guard:
+        if engagement_id in _active_pollers:
+            return
+        _active_pollers.add(engagement_id)
+    t = threading.Thread(
+        target=_poll_results_loop,
+        args=(engagement_id, cfg.execution.result_poll_interval),
+        daemon=True,
+        name=f"poller-{engagement_id[:8]}",
+    )
+    t.start()
+
+
+def _persist_polled_result(engagement_id: str, operation_id: str, detail: dict) -> None:
+    """Save a polled operation detail to the result store (idempotent).
+
+    Mirrors what the /results webhook route does so analyse_results can read the
+    full per-stage stdout/stderr from disk and the operation has an audit record.
+    """
+    results_store = _state.get("results_store")
+    if results_store is None:
+        return
+    try:
+        if results_store.exists(engagement_id, operation_id):
+            return  # webhook (or a prior poll) already saved it
+        results_store.save(engagement_id, operation_id, detail)
+        logger.info(
+            "[poller] persisted pulled result engagement=%s op=%s",
+            engagement_id, operation_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[poller] failed to persist pulled result op=%s: %s", operation_id, exc
+        )
+
+
+def _poll_results_loop(engagement_id: str, interval_s: int) -> None:
+    """Poll the operation for this phase until it completes, then resume."""
+    import time
+
+    from .client.operations import (
+        _progress_percent,
+        _status_of,
+        is_operation_complete,
+    )
+
+    bas = _state["bas"]
+    store: RunStore = _state["store"]
+    op_id: str | None = None
+    tick = 0
+    phase, adversary_id = _current_phase_adversary(engagement_id)
+    logger.info(
+        "[poller] started for %s phase=%s adversary=%s interval=%ds",
+        engagement_id, phase, adversary_id, interval_s,
+    )
+    try:
+        while True:
+            tick += 1
+            rec = store.get(engagement_id)
+            if not rec or rec.get("status") != "awaiting_results":
+                return  # resumed by webhook / scanner / completed — done
+
+            if op_id is None and adversary_id:
+                op_id = _discover_operation_id(bas, adversary_id, engagement_id)
+                if op_id:
+                    logger.info("[poller] %s discovered op=%s", engagement_id, op_id)
+
+            if op_id:
+                try:
+                    detail = bas.operations.get_detail(op_id)
+                except Exception as exc:  # noqa: BLE001
+                    detail = None
+                    logger.warning("[poller] get_detail op=%s failed: %s", op_id, exc)
+                # Heartbeat: emit one line per poll so the wait is visible and the
+                # operation's live status/progress is diagnosable. Without this the
+                # loop is silent between discovery and completion.
+                if detail is not None:
+                    logger.info(
+                        "[poller] %s tick=%d op=%s status=%s progress=%s%% — still waiting",
+                        engagement_id,
+                        tick,
+                        op_id,
+                        _status_of(detail) or "unknown",
+                        _progress_percent(detail),
+                    )
+                if detail and is_operation_complete(detail):
+                    logger.info(
+                        "[poller] %s op=%s status=%s complete — resuming with pulled result",
+                        engagement_id, op_id, _status_of(detail) or "complete",
+                    )
+                    # Persist to the result store BEFORE resuming, exactly like
+                    # the /results webhook does — analyse_results reads full stage
+                    # output from runs/<id>/results/<op>.json, and it's the audit
+                    # record. Idempotent: skip if the webhook already saved it.
+                    _persist_polled_result(engagement_id, op_id, detail)
+                    # Clear active flag BEFORE resuming so the next phase's
+                    # awaiting_results can start a fresh poller.
+                    with _active_pollers_guard:
+                        _active_pollers.discard(engagement_id)
+                    _resume_graph(engagement_id, detail)
+                    return
+            else:
+                logger.info(
+                    "[poller] %s tick=%d no operation found yet "
+                    "(adversary=%s) — still searching",
+                    engagement_id, tick, adversary_id,
+                )
+
+            time.sleep(interval_s)
+    finally:
+        with _active_pollers_guard:
+            _active_pollers.discard(engagement_id)
+
+
+# ---------------------------------------------------------------------------
 # State serialisation
 # ---------------------------------------------------------------------------
 
@@ -147,6 +509,7 @@ def _serialise_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
         "current_phase": state.get("current_phase"),
         "available_phases": state.get("available_phases", []),
         "completed_phases": state.get("completed_phases", []),
+        "master_done": state.get("master_done"),
         "master_briefing": state.get("master_briefing"),
         "master_revisions_used": state.get("master_revisions_used"),
         "planner_attempts": state.get("planner_attempts"),
@@ -155,10 +518,16 @@ def _serialise_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
         "phase_history": list(state.get("phase_history") or []),
         "completed_stages": state.get("completed_stages", []),
         "stage_results": [
-            sr.model_dump(mode="json") for sr in state.get("stage_results", []) or []
+            sr.model_dump(mode="json") if hasattr(sr, "model_dump") else sr
+            for sr in state.get("stage_results", []) or []
         ],
         "memory": state.get("memory", {}),
+        "safety": state.get("safety", {}),
         "foothold": state.get("foothold", {}),
+        "route_hint": state.get("route_hint"),
+        "blocked_reason": state.get("blocked_reason"),
+        "required_ack": state.get("required_ack"),
+        "risk_level": state.get("risk_level"),
         "max_iterations": state.get("max_iterations"),
         "log": list(state.get("log") or []),
     }
@@ -207,7 +576,7 @@ def _run_engagement_inner(engagement_id: str) -> None:
 
     try:
         # 1. Validate phases against catalogue (the master picks the order).
-        requested_phases = list(request.phases or [])
+        requested_phases = [p.value if hasattr(p, 'value') else str(p) for p in (request.phases or [])]
         if requested_phases:
             _, unknown = resolve_phases_to_skills(requested_phases, skill_tool)
             if unknown:
@@ -239,6 +608,8 @@ def _run_engagement_inner(engagement_id: str) -> None:
 
         seed = {
             "foothold": foothold,
+            "kali_sidecar": _kali_sidecar_context(),
+            "safety": request.safety.model_dump(mode="json"),
             "available_phases": requested_phases,
             "max_iterations": request.max_iterations,
             "max_master_revisions": 1,
@@ -269,6 +640,7 @@ def _run_engagement_inner(engagement_id: str) -> None:
         record["awaiting_since"] = now_iso()
         store.save(record)
         logger.info("[engagement %s] PAUSED — awaiting backend results", engagement_id)
+        _start_result_poller(engagement_id)
         return
     except Exception as exc:  # noqa: BLE001
         record["status"] = "failed"
@@ -329,8 +701,13 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
 
         compiled = _get_compiled_graph()
         run_config = {"configurable": {"thread_id": engagement_id}}
-        compiled.invoke(Command(resume=result_payload), config=run_config)
 
+        from .orchestrator.graph import _stream_graph
+        state = _stream_graph(
+            compiled, Command(resume=result_payload), run_config
+        )
+
+        record["state"] = _serialise_state(state)
         record["status"] = "completed"
         record["finished_at"] = now_iso()
         store.save(record)
@@ -342,6 +719,7 @@ def _resume_graph(engagement_id: str, result_payload: dict) -> None:
         record["awaiting_since"] = now_iso()
         store.save(record)
         logger.info("[resume] engagement %s paused again — awaiting results", engagement_id)
+        _start_result_poller(engagement_id)
     except Exception as exc:  # noqa: BLE001
         record["status"] = "failed"
         record["error"] = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"

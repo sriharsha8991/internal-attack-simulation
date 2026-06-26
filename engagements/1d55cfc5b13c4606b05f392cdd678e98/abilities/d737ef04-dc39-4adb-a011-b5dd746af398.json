@@ -1,0 +1,34 @@
+{
+  "ability_id": "d737ef04-dc39-4adb-a011-b5dd746af398",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T10:21:00.425914+00:00",
+  "ability": {
+    "name": "Step 2 - Confirm Nmap presence",
+    "description": "Prove nmap is on PATH or register absence to trigger fallbacks.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1518",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "1d55cfc5b13c4606b05f392cdd678e98"
+  },
+  "stages": [
+    {
+      "stage_name": "Execution",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $nmapPath = Get-Command nmap -ErrorAction SilentlyContinue; if ($nmapPath) { $v = nmap --version 2>&1 | Select-String \"Nmap version\"; Write-Output \"NMAP_AVAILABLE: true\"; Write-Output \"NMAP_VERSION: $v\" } else { Write-Output \"NMAP_AVAILABLE: false\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\step2.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies if the Nmap scanning utility is pre-installed so the playbook can choose the quietest available engine.",
+  "provider": "BAS-Internal",
+  "cited_urls": []
+}

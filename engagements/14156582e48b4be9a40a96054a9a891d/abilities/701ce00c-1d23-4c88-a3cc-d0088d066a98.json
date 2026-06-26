@@ -1,0 +1,34 @@
+{
+  "ability_id": "701ce00c-1d23-4c88-a3cc-d0088d066a98",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-23T10:58:52.128878+00:00",
+  "ability": {
+    "name": "P0 - Current Privilege State Check",
+    "description": "Check current user and groups to determine if privilege escalation is needed, operating purely read-only to stdout.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": null,
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "privesc"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "check_privilege_state",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$error.Clear(); try { whoami /all; whoami /groups } catch { Write-Output \"ERROR: $_\" }",
+      "timeout_seconds": 30,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Per the Master Router revision, we must run P0 (Current Privilege State Check) as a standalone phase first and avoid bundling it with P1. Furthermore, per Evaluator retry feedback, the P0 check must be completely read-only with no disk writes or file creation. Therefore, the command runs purely to stdout with error handling wrapped natively.",
+  "provider": "adversary-simulation-engine",
+  "cited_urls": []
+}

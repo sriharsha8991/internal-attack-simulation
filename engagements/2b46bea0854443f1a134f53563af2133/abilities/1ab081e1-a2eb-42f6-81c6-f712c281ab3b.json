@@ -1,0 +1,34 @@
+{
+  "ability_id": "1ab081e1-a2eb-42f6-81c6-f712c281ab3b",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:24.790696+00:00",
+  "ability": {
+    "name": "Domain Information and DNS Zone Querying",
+    "description": "Discovers current domain structure, Domain Controllers, and Active Directory-integrated DNS zones using built-in .NET and ADSI capabilities.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "ad-enumeration",
+      "dns-discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Query Domain and DNS Zones",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain(); Write-Output \"Domain: $($domain.Name)\"; Write-Output \"DCs: $($domain.DomainControllers)\"; $root = [ADSI]'LDAP://RootDSE'; $dnsZonePath = 'LDAP://CN=MicrosoftDNS,DC=DomainDnsZones,' + $root.defaultNamingContext; if ([System.DirectoryServices.DirectoryEntry]::Exists($dnsZonePath)) { $entry = [ADSI]$dnsZonePath; foreach ($child in $entry.Children) { if ($child.SchemaClassName -eq 'dnsZone') { Write-Output \"DNS Zone: $($child.cn)\" } } } else { Write-Output 'No DomainDnsZones found' } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\dns_zones.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Queries basic AD structure and AD-integrated DNS zones to map potential targets dynamically.",
+  "provider": "system",
+  "cited_urls": []
+}

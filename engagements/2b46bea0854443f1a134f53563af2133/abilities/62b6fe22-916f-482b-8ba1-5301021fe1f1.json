@@ -1,0 +1,36 @@
+{
+  "ability_id": "62b6fe22-916f-482b-8ba1-5301021fe1f1",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:43:11.649434+00:00",
+  "ability": {
+    "name": "SharpGPOAbuse Verification",
+    "description": "Executes SharpGPOAbuse executable to inspect options for GPO-based privilege escalation or credential access.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1484.001",
+    "platform": "windows",
+    "impact_type": "read",
+    "default_severity": "medium",
+    "requires_approval": false,
+    "tags": [
+      "gpo",
+      "gpo-abuse"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Execute SharpGPOAbuse inspection",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { SharpGPOAbuse.exe --help } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\gpo_abuse.txt",
+      "timeout_seconds": 60,
+      "payload_id": "73a64537-e21a-49c0-aa39-053108e651f1"
+    }
+  ],
+  "rationale": "Verifies GPO control paths via Group Policy modification parameters.",
+  "provider": "Lead Red Team Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1484/001/"
+  ]
+}

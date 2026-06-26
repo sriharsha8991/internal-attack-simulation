@@ -1,0 +1,34 @@
+{
+  "ability_id": "94449b63-390e-4442-88dc-b3b2cabf139a",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:28:19.692445+00:00",
+  "ability": {
+    "name": "Step 4 - Multi-Subnet Host Discovery",
+    "description": "Sweeps all extracted subnet CIDRs for live assets, strictly utilizing single quoted regex validation to prevent PowerShell parser breakdown.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "read-only",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "host-discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "stages": [
+    {
+      "stage_name": "Subnet Sweep",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $cidrs=Get-Content C:\\Windows\\Temp\\bas\\network_cidrs.txt; $live_hosts=[System.Collections.Generic.HashSet[string]]::new(); $idx=1; foreach($cidr in $cidrs){ $out_prefix=\"C:\\Windows\\Temp\\bas\\sweep_$idx\"; nmap -sn -PE -PP -PS21,22,80,135,139,443,445,3389,5985 -PA80,443 --min-rate 300 --max-retries 1 -oA $out_prefix $cidr 2>$null; $gnmap=\"$out_prefix.gnmap\"; if(Test-Path $gnmap){ $lines=Get-Content $gnmap; foreach($line in $lines){ if($line -match 'Host: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\s+\\(.*Up'){ $null=$live_hosts.Add($Matches[1]) } } } }; if($live_hosts.Count -eq 0){ try { arp -a | ForEach-Object { if($_ -match '(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})'){ $null=$live_hosts.Add($Matches[1]) } } } catch {} }; $unique_hosts=$live_hosts | Sort-Object; $unique_hosts | Out-File C:\\Windows\\Temp\\bas\\live_hosts.txt -Encoding ascii; $unique_hosts_json=$unique_hosts | ConvertTo-Json -Compress; Write-Output \"network.live_hosts: $unique_hosts_json\"; Write-Output \"LIVE_HOST_COUNT: $($unique_hosts.Count)\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step4.txt",
+      "timeout_seconds": 300,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Correctly sweeps multi-subnet environments and isolates live hosts into evidence files and variables using the required single quoted regex structure.",
+  "provider": "Lead Red Team Planner",
+  "cited_urls": []
+}

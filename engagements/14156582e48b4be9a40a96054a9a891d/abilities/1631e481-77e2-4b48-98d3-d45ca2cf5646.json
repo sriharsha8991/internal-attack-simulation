@@ -1,0 +1,36 @@
+{
+  "ability_id": "1631e481-77e2-4b48-98d3-d45ca2cf5646",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:06.789091+00:00",
+  "ability": {
+    "name": "Verify Scanner Availability",
+    "description": "Check if nmap or other security scanners are on local path.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1518",
+    "platform": "windows",
+    "impact_type": "low",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "software"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "Nmap Verification",
+      "stage_order": 3,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); nmap --version; Write-Output \"NMAP_AVAILABLE: true\" } catch { Write-Output \"NMAP_AVAILABLE: false\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step2.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies whether native or pre-installed executables exist, otherwise pivots to native PowerShell discovery implementations.",
+  "provider": "Lead Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1518/"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "ability_id": "3d0901dd-e7fa-4134-bf2d-14e68ee7e9d5",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:05:48.595573+00:00",
+  "ability": {
+    "name": "Step 0 - Machine Context Check",
+    "description": "Natively determines machine details, domain registration, parsed privileges, and checks running processes/services for known AV/EDR agents to satisfy OPSEC constraints.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "context-check"
+    ],
+    "created_by": "ai",
+    "engagement_id": "37f14cc91cec41b3a0c3afeb9edddfa6"
+  },
+  "stages": [
+    {
+      "stage_name": "Get Context",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $current_user = whoami; $privs = @(); whoami /priv /fo csv | ConvertFrom-Csv | ForEach-Object { if ($_.PrivilegeName) { $privs += $_.PrivilegeName } }; $privs_json = $privs | ConvertTo-Json -Compress; $cs = Get-WmiObject Win32_ComputerSystem; $part_of_domain = if ($cs.PartOfDomain) { \"true\" } else { \"false\" }; $domain_name = $cs.Domain; $av_edr = @(); try { $avs = Get-WmiObject -Namespace root\\SecurityCenter2 -Class AntiVirusProduct -ErrorAction SilentlyContinue; if ($avs) { $avs | ForEach-Object { $av_edr += $_.displayName } } } catch {}; $services = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"defender|crowdstrike|carbon|sentinel|cylance|cortex|sysmon\" }; if ($services) { $services | ForEach-Object { $av_edr += $_.Name } }; $processes = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"defender|crowdstrike|carbon|sentinel|cylance|cortex|sysmon\" }; if ($processes) { $processes | ForEach-Object { $av_edr += $_.Name } }; $av_edr_json = ($av_edr | Sort-Object -Unique) | ConvertTo-Json -Compress; $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 } | ForEach-Object { $b = ([System.Net.IPAddress]$_.IPAddress).GetAddressBytes(); $mk = [System.BitConverter]::GetBytes([uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$_.PrefixLength))); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($mk) }; $net = (0..3|ForEach-Object{$b[$_]-band $mk[$_]}) -join '.'; \"$net/$($_.PrefixLength)\" }; $adapters_json = ($adapters | Sort-Object -Unique) | ConvertTo-Json -Compress; Write-Output \"PLATFORM: windows\"; Write-Output \"HOSTNAME: $env:COMPUTERNAME\"; Write-Output \"CURRENT_USER: $current_user\"; Write-Output \"DOMAIN_JOINED: $part_of_domain\"; Write-Output \"DOMAIN_NAME: $domain_name\"; Write-Output \"TOKEN_PRIVILEGES: $privs_json\"; Write-Output \"AV_EDR: $av_edr_json\"; Write-Output \"NETWORK_CIDRS: $adapters_json\"; ($adapters | Sort-Object -Unique) | Out-File \"$d\\network_cidrs.txt\" -Encoding ascii } catch { Write-Output \"ERROR: step0 failed - $_\" }) | Tee-Object -FilePath $d\\step0.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Performs initial local profiling and parses security state programmatically.",
+  "provider": "specialist",
+  "cited_urls": []
+}

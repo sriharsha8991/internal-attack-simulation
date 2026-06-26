@@ -1,0 +1,22 @@
+{
+  "adversary_id": "5d88d5b8-7f67-4efc-ab6d-261262d60211",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:43:13.618006+00:00",
+  "adversary": {
+    "name": "APT-CredAccess-CASTELBLACK",
+    "description": "Sophisticated threat actor targeting Windows Server 2019 credentials via SAM, LSA registry, DPAPI, Kerberoasting, and LSASS dumping techniques.",
+    "profile": "APT",
+    "execution_strategy": "Iterative credential harvesting with native fallbacks and strict error-handling structures.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "a880be9d-23e6-451a-ae54-d1970770dafd",
+    "ebfe3d57-1b83-4e3e-82c9-17502db1ee14",
+    "7c16d2d3-d0c2-4c45-9b41-2ca2776fb291",
+    "90affe17-02a9-443f-a661-23413a85585b",
+    "62b6fe22-916f-482b-8ba1-5301021fe1f1"
+  ]
+}

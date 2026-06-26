@@ -1,0 +1,34 @@
+{
+  "ability_id": "5009ec59-ffc9-4ec0-87db-3d6ad65e3690",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T12:09:39.614530+00:00",
+  "ability": {
+    "name": "Step 6 \u2014 Targeted Version & Banner Deepening",
+    "description": "Perform precise query requests against high-value systems to retrieve server roles and domain details prior to gating decisions.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "Low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "banner-deepening"
+    ],
+    "created_by": "ai",
+    "engagement_id": "452238f1766e403db19618a864fbc2a6"
+  },
+  "stages": [
+    {
+      "stage_name": "Secure Banner Deepening",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $servicesFile = \"$d\\services.json\"; if (Test-Path $servicesFile) { $services = Get-Content $servicesFile | ConvertFrom-Json; foreach ($ip in $services.psobject.Properties.Name) { $ports = $services.$ip; foreach ($p in $ports) { if ($p.port -eq 445) { Write-Output \"FINGERPRINTING SMB ON $ip\"; $netView = net view \\\\$ip 2>&1; Write-Output \"BANNER $ip`:445 : $netView\" }; if ($p.port -eq 389) { Write-Output \"FINGERPRINTING LDAP ON $ip\"; try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$ip/RootDSE\"); $dnsHostName = $de.Properties['dnsHostName'].Value; $defaultNamingContext = $de.Properties['defaultNamingContext'].Value; Write-Output \"BANNER $ip`:389 : dnsHostName=$dnsHostName, defaultNamingContext=$defaultNamingContext\" } catch { Write-Output \"BANNER $ip`:389 : rootDSE query failed\" } } } } } else { Write-Output \"WARN: No services.json found to deepen fingerprints.\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\step6.txt",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies precise Active Directory indicators dynamically without loud broad sweeps.",
+  "provider": "Lead Red-Team Operator",
+  "cited_urls": []
+}

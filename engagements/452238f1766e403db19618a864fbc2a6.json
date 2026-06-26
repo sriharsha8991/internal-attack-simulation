@@ -1,0 +1,147 @@
+{
+  "run_id": "452238f1766e403db19618a864fbc2a6",
+  "status": "completed",
+  "started_at": "2026-06-23T11:46:41.101037+00:00",
+  "finished_at": "2026-06-23T12:11:24.636144+00:00",
+  "request": {
+    "phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "environment": {
+      "id": "82e01037-11db-4b59-a79c-661b3838cfea",
+      "name": "Test Prod"
+    },
+    "target": {
+      "platform": "windows"
+    },
+    "max_iterations": 20,
+    "dry_run": true
+  },
+  "state": {
+    "engagement_id": null,
+    "iteration": 2,
+    "next_stage": null,
+    "current_phase": null,
+    "available_phases": [],
+    "completed_phases": [
+      "discovery"
+    ],
+    "master_done": true,
+    "master_briefing": null,
+    "master_revisions_used": null,
+    "planner_attempts": null,
+    "planner_tool_calls": null,
+    "proposal_log": [],
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Perform initial host and Active Directory discovery from the local foothold CASTELBLACK.",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "abilities_pushed": 7,
+        "adversary_id": "c1aa1469-b539-427c-aae7-b94ad8a1abfc",
+        "ability_names": [
+          "Step 0 \u2014 Machine context check & AV/EDR Enumeration",
+          "Step 1 \u2014 Determine the local network range",
+          "Step 2 \u2014 Confirm nmap is installed",
+          "Step 4 \u2014 Host discovery / live-asset map",
+          "Step 5 \u2014 Service / port enumeration on live hosts",
+          "Step 6 \u2014 Targeted Version & Banner Deepening",
+          "Step 7 \u2014 DC gate"
+        ],
+        "techniques_used": [
+          "T1046",
+          "T1016",
+          "T1518",
+          "T1018",
+          "T1033"
+        ],
+        "key_commands": [
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $id = whoami /all; $priv = whoami /priv; $cs = Get-WmiObject Win32_ComputerSystem; $do",
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $ip = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '192.16",
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $v = nmap --version 2>&1 | Select-String 'Nmap'; if ($v) { Write-Output \"NMAP_AVAILABL",
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $cidrRaw = '192.168.187.0/24'; if (Test-Path \"$d\\network_cidr.txt\") { $cidrRaw = Get-C",
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $hostsFile = \"$d\\live_hosts.txt\"; $hosts = @(); if (Test-Path $hostsFile) { $hosts = G",
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $servicesFile = \"$d\\services.json\"; if (Test-Path $servicesFile) { $services = Get-Con",
+          "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $dcIp = $null; $baseDn = $null; if (Test-Path \"$d\\services.json\") { $services = Get-Co"
+        ],
+        "outcome": "committed",
+        "master_revisions": 1,
+        "planner_attempts": 3,
+        "memory_delta_keys": [],
+        "execution_outcome": {
+          "operation_id": "3d651381-f7b4-422b-924d-09fd085fb4ff",
+          "abilities_passed": 7,
+          "abilities_failed": 0,
+          "issues_detected": []
+        }
+      }
+    ],
+    "completed_stages": [],
+    "stage_results": [],
+    "memory": {
+      "narratives": [
+        {
+          "phase": "discovery",
+          "ts": "2026-06-23T12:09:57.275699+00:00",
+          "text": "We have committed an initial discovery plan targeting the CASTELBLACK foothold and its local subnet of 192.168.187.0/24. This phase focuses heavily on gathering local machine context, identifying active security controls, mapping out live hosts across the /24 network, and confirming the existence of any active Domain Controllers via lightweight TCP and LDAP/SMB banner querying. The output will establish our baseline network map, populate verified targets for Active Directory enumeration, and dynamically dictate whether we proceed to AD-specific targeting or local privilege escalation."
+        },
+        {
+          "phase": "discovery",
+          "ts": "2026-06-23T12:11:02.639418+00:00",
+          "text": "Initial discovery from CASTELBLACK (192.168.187.141) has successfully completed, identifying a domain-joined Windows Server 2019 instance with Windows Defender real-time protection disabled. Network scanning confirmed an active Active Directory environment for the domain 'north.sevenkingdoms.local'. A domain controller, 'winterfell.north.sevenkingdoms.local' (192.168.187.140), was identified with Kerberos, LDAP, and SMB services active. Another potential target with Kerberos and LDAP enabled was also discovered at 192.168.187.142. Next-phase recommendations point to active directory enumeration."
+        }
+      ]
+    },
+    "foothold": {},
+    "max_iterations": null,
+    "log": [
+      "[master_plan/pick] phase=discovery skills=['discovering-environment'] objective='Perform initial host and Active Directory discovery from the local foothold CASTELBLACK.'",
+      "[plan] phase=discovery attempt=1/3 success=True abilities=6 tool_calls=1/20",
+      "[evaluate] phase=discovery action=retry attempt=1/3 mismatches=['PowerShell syntax error: multiple default catch blocks in Step 2.', 'Missing host.av_edr query in Step 0.', 'Step 7 does not resolve domain.base_dn or set recon.ad_present.', 'Omission of Step 6 (Targeted version & banner deepening).']",
+      "[plan] phase=discovery attempt=2/3 success=True abilities=8 tool_calls=2/20",
+      "[evaluate] phase=discovery action=retry attempt=2/3 mismatches=['Step 5 uses self-overwriting dictionary assignment ($svcMap[$portNum] = $svcName) that results in null service names.', 'Step 4 nmap output does not follow the required sweep_*.gnmap convention and overwrites intermediate sweep files.']",
+      "[plan] phase=discovery attempt=3/3 success=True abilities=6 tool_calls=3/20",
+      "[evaluate] phase=discovery action=retry-exhausted phase_done=False confidence=0.95 mismatches=['Missing Step 6 (Targeted version & banner deepening) from the playbook sequence.', \"Incorrect 'recommended_next' routing ('establishing-persistence' instead of 'escalating-privileges') on DC Gate failure.\", \"Step 7 does not explicitly output separate variables for 'recon.ad_present' and 'network.has_domain_controller'.\"]",
+      "[plan] phase=discovery forwarding plan to master (evaluator=retry-exhausted)",
+      "[master_plan/review] phase=discovery action=revise (1/1) missing=['Step 6: Targeted version & banner deepening', \"Correct failure routing destination 'escalating-privileges'\", 'Explicit outputs for RECON_AD_PRESENT and HAS_DOMAIN_CONTROLLER']",
+      "[plan] phase=discovery attempt=1/3 success=True abilities=8 tool_calls=4/20",
+      "[evaluate] phase=discovery action=retry attempt=1/3 mismatches=['Step 4 failed to sweep all CIDRs inside network.cidrs.', \"Step 4 and Step 5 use 'ForEach-Object -Parallel', which fails on PowerShell 5.1.\", 'Step 4 fallback ping timeout is 150ms instead of the required 500ms.', 'Step 5 uses -oA C:\\\\Windows\\\\Temp\\\\bas\\\\nmap_ports instead of C:\\\\Windows\\\\Temp\\\\bas\\\\nmap_services.']",
+      "[plan] phase=discovery attempt=2/3 success=True abilities=6 tool_calls=5/20",
+      "[evaluate] phase=discovery action=retry attempt=2/3 mismatches=['Step 0 is missing mandatory AV/EDR detection required for the `host.av_edr` memory key.', 'Step 7 (DC Gate) fails to query the LDAP naming context to resolve the mandatory `domain.base_dn` memory key.']",
+      "[plan] phase=discovery attempt=3/3 success=True abilities=7 tool_calls=6/20",
+      "[evaluate] phase=discovery action=retry-exhausted phase_done=False confidence=1.00 mismatches=['Step 4 does not sweep all CIDRs in network.cidrs.', \"Step 4 fails to write 'live_hosts.json' to disk.\", 'Step 5 uses bare Out-File without displaying the JSON output or using Tee-Object.', 'Step 0 adapter output format deviates from the playbook and does not calculate the base network address.']",
+      "[plan] phase=discovery forwarding plan to master (evaluator=retry-exhausted)",
+      "[master_plan/review] phase=discovery action=commit confidence=1.00",
+      "[push] phase=discovery skill=discovering-environment success=True adversary=c1aa1469-b539-427c-aae7-b94ad8a1abfc abilities=7 narrative='We have committed an initial discovery plan targeting the CASTELBLACK foothold and its local subnet of 192.168.187.0/24.'",
+      "[analyse_results] op=3d651381-f7b4-422b-924d-09fd085fb4ff passed=7/7 issues=0 phase_done=True",
+      "[master_plan/pick] master picked 'ad-enumeration' but it is not in available_phases=['discovery', 'privesc', 'credaccess', 'lateral', 'persistence', 'defevasion', 'impact']; halting"
+    ]
+  },
+  "error": null,
+  "skill_order": [
+    "discovery",
+    "privesc",
+    "credaccess",
+    "lateral",
+    "persistence",
+    "defevasion",
+    "impact"
+  ],
+  "foothold": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "environment_name": "Test Prod",
+    "agent_id": "277f297f",
+    "hostname": "CASTELBLACK",
+    "platform": "windows",
+    "ip_address": "192.168.187.141",
+    "display_status": "online"
+  }
+}

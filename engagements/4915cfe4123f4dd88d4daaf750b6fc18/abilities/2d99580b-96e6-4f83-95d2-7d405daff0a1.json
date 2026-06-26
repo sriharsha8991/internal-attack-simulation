@@ -1,0 +1,34 @@
+{
+  "ability_id": "2d99580b-96e6-4f83-95d2-7d405daff0a1",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:00:31.480877+00:00",
+  "ability": {
+    "name": "Step 7 - Active Directory Gating Check",
+    "description": "Inspects verified port list results to evaluate active directory server patterns and triggers Phase B routing rules.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "stages": [
+    {
+      "stage_name": "dc_gate",
+      "stage_order": 6,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $dc_found = $false; $dc_ip = $null; $base_dn = $null; $dc_hostname = $null; if (Test-Path \"$d/nmap_services.gnmap\") { Get-Content \"$d/nmap_services.gnmap\" | ForEach-Object { if ($_ -match 'Host: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}).+Ports:\\s+([^/]+/\\s*open\\s*/[^/]*88/[^/]*|[^/]+/\\s*open\\s*/[^/]*389/[^/]*)') { $dc_found = $true; $dc_ip = $Matches[1] } } } elseif (Test-Path \"$d/services.json\") { $json = Get-Content \"$d/services.json\" | ConvertFrom-Json; foreach ($ip in $json.PSObject.Properties.Name) { $ports = $json.$ip; $has_ldap_or_kerb = $ports | Where-Object { $_.port -eq 88 -or $_.port -eq 389 }; if ($has_ldap_or_kerb) { $dc_found = $true; $dc_ip = $ip } } }; if ($dc_found -and $dc_ip) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$dc_ip\"); $base_dn = $de.Properties['defaultNamingContext'].Value; $dc_hostname = $de.Properties['dnsHostName'].Value } catch {}; Write-Output \"DC_FOUND: true\"; Write-Output \"AD_PRESENT: true\"; Write-Output \"DC_IP: $dc_ip\"; if ($base_dn) { Write-Output \"BASE_DN: $base_dn\" }; if ($dc_hostname) { Write-Output \"DC_HOSTNAME: $dc_hostname\" }; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"AD_PRESENT: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"AD_PRESENT: false\"; \"ERROR: $_\" }) | Tee-Object -FilePath $d/dc_gate.txt",
+      "timeout_seconds": 300,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies active Directory presence explicitly by registering both DC_FOUND and AD_PRESENT flags, avoiding compliance issues and correctly guiding subsequent Phase B enumeration steps.",
+  "provider": "Lead Red Team Operator",
+  "cited_urls": []
+}

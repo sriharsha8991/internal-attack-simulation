@@ -26,5 +26,3 @@ def test_dump_graph_png() -> None:
     ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     ARTIFACT.write_bytes(app.get_graph().draw_mermaid_png())
     assert ARTIFACT.exists() and ARTIFACT.stat().st_size > 0
-
-test_dump_graph_png()

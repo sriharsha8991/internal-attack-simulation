@@ -1,0 +1,33 @@
+{
+  "ability_id": "38422216-e68e-4f2d-8852-52150f663e6e",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:27.415807+00:00",
+  "ability": {
+    "name": "Domain Admin Session Mapping",
+    "description": "Identifies Domain Admin members and current sessions on active hosts using ADSI and native query tools.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1049",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "session-discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Enumerate DA Members and Active Sessions",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcher = [adsisearcher]'(cn=Domain Admins)'; $group = $searcher.FindOne(); if ($group) { foreach ($member in $group.Properties.member) { Write-Output \"DA Member: $member\" } } qwinsta; quser } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\da_sessions.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Queries Domain Admin membership and correlates it with current session data to identify high-value targets.",
+  "provider": "system",
+  "cited_urls": []
+}

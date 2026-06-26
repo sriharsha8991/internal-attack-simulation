@@ -1,0 +1,34 @@
+{
+  "ability_id": "d387f160-5668-4b47-92a9-ec41d9388456",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T07:00:10.551842+00:00",
+  "ability": {
+    "name": "Step 1 \u2014 Determine Local Network Ranges",
+    "description": "Dynamically queries network adapters and determines subnets in CIDR format to target active scans.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1016",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "network"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Subnet_Extraction",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 }; $cidrs = foreach ($a in $adapters) { $ip = [System.Net.IPAddress]::Parse($a.IPAddress); $bytes = $ip.GetAddressBytes(); $maskVal = [uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$a.PrefixLength)); $maskBytes = [System.BitConverter]::GetBytes($maskVal); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($maskBytes) }; $netBytes = 0..3 | ForEach-Object { $bytes[$_] -band $maskBytes[$_] }; $netStr = $netBytes -join '.'; \"$netStr/$($a.PrefixLength)\" }; $cidrs = $cidrs | Sort-Object -Unique; $cidrs | Out-File -FilePath \"C:\\Windows\\Temp\\bas\\network_cidrs.txt\" -Encoding ascii; $cidrs } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step1.txt",
+      "timeout_seconds": 300,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Allows dynamic extraction of the Class-C subnets without hardcoded values, generating a target list for live sweeps.",
+  "provider": "APT-Planner",
+  "cited_urls": []
+}

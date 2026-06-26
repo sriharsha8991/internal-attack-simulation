@@ -1,0 +1,48 @@
+{
+  "operation_id": "f7543126-3a78-416a-9fbb-69edf380901e",
+  "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+  "name": "Auto Test - APT Privilege Escalation Initiator",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "a0156b1b-b275-4596-a822-bf9390c0a3ea",
+    "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+    "name": "APT Privilege Escalation Initiator",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 1,
+    "completed_abilities": 1,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-24T12:55:51.403757",
+  "completed_at": "2026-06-24T12:55:57.352725",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "ce3062ad-ef71-4d1a-a57a-e82de611a78d",
+      "stage_id": "88f8471d-a428-44ac-9a63-c69a772da350",
+      "command_executed": "powershell -ExecutionPolicy Bypass -Command \"$error.Clear(); try { whoami /all; whoami /groups } catch { Write-Host 'ERROR: $_' }\"",
+      "stdout": "",
+      "stderr": "At line:1 char:8\n+ .Clear(); try { whoami /all; whoami /groups } catch { Write-Host 'ERR ...\n+        ~\nAn expression was expected after '('.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : ExpectedExpression\n \n",
+      "exit_code": 1,
+      "executor": "",
+      "timestamp": "2026-06-24T12:55:51.920523"
+    }
+  ]
+}

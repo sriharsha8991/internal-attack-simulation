@@ -1,0 +1,24 @@
+{
+  "adversary_id": "52ef56fe-6fb2-4ed4-9267-d3d9acb28352",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T06:26:07.447879+00:00",
+  "adversary": {
+    "name": "APT-Style Environment Discovery and Mapping",
+    "description": "Emulates an APT executing stealthy initial internal discovery, network range profiling, and service fingerprinting, transitioning smoothly based on domain controller presence.",
+    "profile": "APT-Discovery-Phase-A",
+    "execution_strategy": "Sequential Phase A execution mapping network topology and discovering Tier-0 assets.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "6abad87b-1b5f-4fb9-b70c-036c4efac347",
+    "7d23b305-4e27-44c6-805c-4446e213f7ba",
+    "b816be5b-19f2-4cd8-a192-281105b095b0",
+    "60b763dc-fc07-436d-b521-3c6667930c74",
+    "bf2d6d6f-a58d-439f-bc25-fc6f2db81e61",
+    "a18807b2-9a82-4bfb-995d-7d2f162dac63",
+    "c3b93045-7e5e-418b-a073-2c18f1e589e1"
+  ]
+}

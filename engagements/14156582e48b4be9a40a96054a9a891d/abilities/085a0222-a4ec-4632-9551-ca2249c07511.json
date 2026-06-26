@@ -1,0 +1,36 @@
+{
+  "ability_id": "085a0222-a4ec-4632-9551-ca2249c07511",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-23T11:14:35.828965+00:00",
+  "ability": {
+    "name": "Audit LSA Protection State",
+    "description": "Checks registry settings to verify if LSA Protection (RunAsPPL) is configured to prevent unauthorized LSASS reading.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1012",
+    "platform": "windows",
+    "impact_type": "none",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "audit",
+      "defensive"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "Check RunAsPPL Registry Key",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d|Out-Null}; $(try { $ErrorActionPreference = 'Stop'; Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'RunAsPPL' } catch { \"ERROR: LSA Protection key check failed or not set - $_\" }) | Tee-Object -FilePath $d\\out.txt",
+      "timeout_seconds": 30,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Auditing the configuration of LSA Protection is the recommended, non-disruptive method to evaluate host resilience against memory dumping techniques.",
+  "provider": "defense-audit",
+  "cited_urls": [
+    "https://learn.microsoft.com/en-us/windows-server/security/credentials-protection-and-management/configuring-additional-lsa-protection"
+  ]
+}

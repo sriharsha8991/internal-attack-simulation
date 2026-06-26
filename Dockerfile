@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -7,8 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 
-# uv from the official image
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
+RUN pip install uv==0.5.*
 
 WORKDIR /app
 

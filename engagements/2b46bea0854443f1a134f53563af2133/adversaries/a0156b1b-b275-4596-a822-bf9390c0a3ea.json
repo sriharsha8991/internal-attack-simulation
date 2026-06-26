@@ -1,0 +1,18 @@
+{
+  "adversary_id": "a0156b1b-b275-4596-a822-bf9390c0a3ea",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-24T07:25:35.782143+00:00",
+  "adversary": {
+    "name": "APT Privilege Escalation Initiator",
+    "description": "Performs safe, non-intrusive local privilege state checks to determine integrity level and next steps on CASTELBLACK.",
+    "profile": "APT",
+    "execution_strategy": "Sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "ce3062ad-ef71-4d1a-a57a-e82de611a78d"
+  ]
+}

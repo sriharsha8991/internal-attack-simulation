@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from .agents import (
@@ -17,6 +18,7 @@ from .agents import (
     LLMMasterRouter,
     LLMPlanner,
     MasterPolicy,
+    PayloadCatalog,
     Planner,
     StaticAcceptEvaluator,
     StaticMasterRouter,
@@ -43,6 +45,8 @@ _state: dict[str, Any] = {
     "bas": None,             # process-global BasClient (Issue #3 fix)
     "compiled_graph": None,  # singleton compiled graph with checkpointer
     "llm_provider": None,    # shared LLM provider instance
+    "payload_catalog": None, # process-global payload catalog (fetched at boot)
+    "kali": None,            # Kali toolbox sidecar client (optional)
 }
 _state_lock = threading.Lock()
 
@@ -73,12 +77,38 @@ def _bootstrap() -> tuple[AppConfig, SkillTool, RunStore, ArtifactStore]:
                 dry_run=cfg.bas.dry_run,
             )
 
+            # Fetch the payload catalog ONCE per process. Payloads don't change
+            # mid-engagement; refetching per phase would just add a failure mode.
+            # PayloadCatalog.fetch swallows transport errors and returns empty,
+            # so this never blocks boot.
+            payload_catalog = PayloadCatalog.fetch(bas)
+
+            # Kali toolbox sidecar (optional — only when enabled in config).
+            kali = None
+            if cfg.kali.enabled:
+                from .client.kali import KaliClient
+
+                kali = KaliClient(
+                    cfg.kali.base_url,
+                    timeout=cfg.kali.timeout,
+                    connect_timeout=cfg.kali.connect_timeout,
+                )
+                if kali.is_healthy():
+                    logger.info("[boot] kali sidecar connected at %s", cfg.kali.base_url)
+                else:
+                    logger.warning(
+                        "[boot] kali sidecar at %s not healthy — commands will fail until it's up",
+                        cfg.kali.base_url,
+                    )
+
             # Commit atomically — all or nothing.
             _state["skills"] = skills
             _state["store"] = store
             _state["artifacts"] = artifacts
             _state["results_store"] = results_store
             _state["bas"] = bas
+            _state["payload_catalog"] = payload_catalog
+            _state["kali"] = kali
             _state["cfg"] = cfg  # set LAST — this is the guard variable
 
             logger.info(
@@ -108,15 +138,21 @@ def _get_provider(cfg: AppConfig):
     return _state["llm_provider"]
 
 
+def get_kali():
+    """Return the Kali client, or None if disabled / not yet bootstrapped."""
+    return _state.get("kali")
+
+
 def _build_master(cfg: AppConfig, *, dry_run: bool) -> MasterPolicy:
     """Master router (campaign director). Falls back to StaticMasterRouter when
     no LLM key is configured (dry-run only)."""
+    catalog = _state.get("payload_catalog")
     if dry_run:
         try:
-            return LLMMasterRouter(_get_provider(cfg))
+            return LLMMasterRouter(_get_provider(cfg), catalog=catalog)
         except Exception:
             return StaticMasterRouter()
-    return LLMMasterRouter(_get_provider(cfg))
+    return LLMMasterRouter(_get_provider(cfg), catalog=catalog)
 
 
 def _build_evaluator(cfg: AppConfig, *, dry_run: bool):
@@ -129,28 +165,64 @@ def _build_evaluator(cfg: AppConfig, *, dry_run: bool):
 
 
 def _build_planner(cfg: AppConfig, *, dry_run: bool) -> Planner:
+    catalog = _state.get("payload_catalog")
     if dry_run:
         try:
-            return LLMPlanner(_get_provider(cfg))
+            return LLMPlanner(_get_provider(cfg), catalog=catalog)
         except Exception:
             from .worker import _DryRunStubPlanner
             return _DryRunStubPlanner()
-    return LLMPlanner(_get_provider(cfg))
+    return LLMPlanner(_get_provider(cfg), catalog=catalog)
 
 
 def _build_checkpointer(cfg: AppConfig) -> Any:
-    """Build a LangGraph checkpointer from config."""
+    """Build a LangGraph checkpointer from config.
+
+    For sqlite we open the connection directly (rather than
+    ``SqliteSaver.from_conn_string``, which is a context manager that would
+    close the DB on ``__exit__``) so the saver stays usable for the whole
+    process lifetime — resumes happen on a later request, long after build.
+    """
     if cfg.execution.checkpointer == "sqlite":
         try:
+            import sqlite3
+
             from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore[import-not-found]
         except ImportError:
-            raise ImportError(
-                "checkpointer=sqlite requires 'langgraph-checkpoint-sqlite'; "
-                "install it with: uv add langgraph-checkpoint-sqlite"
-            ) from None
-        return SqliteSaver.from_conn_string(cfg.execution.checkpoint_db)
+            # Degrade rather than crash at boot: an in-memory saver still works,
+            # it just won't survive a restart. Make the trade-off loud.
+            logger.error(
+                "[boot] checkpointer=sqlite but 'langgraph-checkpoint-sqlite' is "
+                "not installed; falling back to in-memory checkpointer — paused "
+                "engagements will NOT survive a restart. Install it with: "
+                "uv add langgraph-checkpoint-sqlite"
+            )
+        else:
+            db_path = Path(cfg.execution.checkpoint_db)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            # check_same_thread=False: the worker may resume an engagement from a
+            # different thread than the one that created the checkpoint.
+            conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            return SqliteSaver(conn, serde=_build_serde())
     from langgraph.checkpoint.memory import MemorySaver
     return MemorySaver()
+
+
+def _build_serde() -> Any:
+    """Checkpoint serializer with our custom state types registered.
+
+    LangGraph's msgpack serde warns on (and will soon BLOCK) deserialization of
+    types it doesn't recognise. ``StageResult`` is the only custom pydantic model
+    stored as an instance in SessionState (everything else is ``model_dump()``-ed
+    to plain dicts), but we register ``PhaseRecord`` too as a defensive measure
+    against any future code path that forgets to dump it. Registering an explicit
+    allowlist also opts us into the future strict behaviour safely.
+    """
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    from .orchestrator.state import PhaseRecord, StageResult
+
+    return JsonPlusSerializer(allowed_msgpack_modules=[StageResult, PhaseRecord])
 
 
 def _get_compiled_graph():

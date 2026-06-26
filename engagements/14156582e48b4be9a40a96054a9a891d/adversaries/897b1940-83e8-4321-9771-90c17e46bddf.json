@@ -1,0 +1,18 @@
+{
+  "adversary_id": "897b1940-83e8-4321-9771-90c17e46bddf",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-23T10:58:52.808901+00:00",
+  "adversary": {
+    "name": "APT Privilege Escalation Operator",
+    "description": "An operator specializing in privilege escalation, starting with a read-only privilege state check (P0).",
+    "profile": "privesc",
+    "execution_strategy": "sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "linked_ability_ids": [
+    "701ce00c-1d23-4c88-a3cc-d0088d066a98"
+  ]
+}

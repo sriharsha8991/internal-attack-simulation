@@ -1,0 +1,34 @@
+{
+  "ability_id": "a18807b2-9a82-4bfb-995d-7d2f162dac63",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T06:26:03.048156+00:00",
+  "ability": {
+    "name": "Step 6 \u2014 Targeted Service Fingerprinting Deepening",
+    "description": "Query rootDSE on identified domain controller candidate nodes to extract domain names, forest functionality, and base DN.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "ldap-fingerprint"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "fingerprinting",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $dcCandidates = [System.Collections.Generic.List[string]]::new(); $step5Logs = Get-Content \"$d/step5_out.txt\" -ErrorAction SilentlyContinue | Out-String; if ($step5Logs -match \"OPEN: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}):(389|88|3268)\") { $matches = [regex]::Matches($step5Logs, \"OPEN: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}):(389|88|3268)\"); foreach ($m in $matches) { $null = $dcCandidates.Add($m.Groups[1].Value) } }; if ($dcCandidates.Count -eq 0) { $gateways = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty NextHop; foreach ($g in $gateways) { if ($g -and $g -ne '0.0.0.0') { $null = $dcCandidates.Add($g) } } }; $success = $false; foreach ($dc in $dcCandidates | Sort-Object -Unique) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$dc\"); $de.RefreshCache(); $dnsHostName = $de.Properties['dnsHostName'].Value; $defaultNamingContext = $de.Properties['defaultNamingContext'].Value; $domainFunctionality = $de.Properties['domainFunctionality'].Value; if ($defaultNamingContext) { Write-Output \"DC_CANDIDATE: $dc\"; Write-Output \"dnsHostName: $dnsHostName\"; Write-Output \"defaultNamingContext: $defaultNamingContext\"; Write-Output \"domainFunctionality: $domainFunctionality\"; $success = $true } } catch { Write-Output \"WARN: Failed unauthenticated rootDSE probe on $dc - $($_.Exception.Message)\" } }; if (-not $success) { Write-Output \"No Active Directory rootDSE responses received\" } } catch { Write-Output \"ERROR: step6_fingerprinting $($_.Exception.Message)\" }) | Tee-Object -FilePath $d/step6_out.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Extract base LDAP attributes without authentication to pinpoint active directory domain details safely.",
+  "provider": "builtin",
+  "cited_urls": []
+}

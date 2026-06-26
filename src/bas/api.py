@@ -24,17 +24,18 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-import threading
-from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from .bootstrap import _bootstrap, _get_compiled_graph, _state
+from .bootstrap import _bootstrap, _state
 from .foothold import FootholdResolutionError
-from .persistence import RunStore, now_iso
+from .persistence import now_iso
 from .routes import engagements_router, results_router
+from .routes.ui_api import ui_router
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,21 @@ app = FastAPI(
     description="HTTP trigger surface for the BAS internal-attack orchestrator.",
 )
 
+# Register routes
 app.include_router(engagements_router)
 app.include_router(results_router)
+app.include_router(ui_router)
+
+# Mount static folder for SPA Dashboard
+static_dir = Path(__file__).resolve().parent / "static"
+static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def redirect_to_dashboard():
+    """UX Redirect to the responsive manual skill editor and trigger panel."""
+    return RedirectResponse(url="/static/index.html")
 
 
 # ---------------------------------------------------------------------------
@@ -68,105 +82,25 @@ def _startup() -> None:
             rec["finished_at"] = now_iso()
             store.save(rec)
 
-    _start_timeout_scanner(cfg.execution.result_wait_timeout)
+    from .worker import _start_timeout_scanner
+
+    _start_timeout_scanner(
+        cfg.execution.result_wait_timeout,
+        cfg.execution.result_hard_timeout,
+    )
 
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
-    """Gracefully close the process-global BasClient (httpx connection pool)."""
+    """Gracefully close process-global HTTP clients."""
     bas = _state.get("bas")
     if bas is not None:
         bas.close()
         logger.info("[shutdown] BasClient closed")
-
-
-def _start_timeout_scanner(timeout_seconds: int) -> None:
-    """Periodically resume engagements stuck in awaiting_results past timeout."""
-    import time
-
-    def _scan() -> None:
-        while True:
-            time.sleep(60)  # check every minute
-            try:
-                _expire_stale_engagements(timeout_seconds)
-            except Exception:  # noqa: BLE001
-                logger.exception("[timeout-scanner] error during scan")
-
-    t = threading.Thread(target=_scan, daemon=True, name="timeout-scanner")
-    t.start()
-    logger.info("[boot] timeout scanner started (timeout=%ds)", timeout_seconds)
-
-
-def _expire_stale_engagements(timeout_seconds: int) -> None:
-    """Resume graphs that have been waiting longer than the configured timeout."""
-    from langgraph.types import Command
-
-    from .worker import _get_engagement_lock
-
-    store: RunStore = _state["store"]
-    compiled = _get_compiled_graph()
-    now = datetime.now(timezone.utc)
-
-    for record in store.list_all():
-        if record.get("status") != "awaiting_results":
-            continue
-        awaiting_since = record.get("awaiting_since")
-        if not awaiting_since:
-            continue
-        elapsed = (now - datetime.fromisoformat(awaiting_since)).total_seconds()
-        if elapsed <= timeout_seconds:
-            continue
-
-        engagement_id = record["run_id"]
-        logger.warning(
-            "[timeout-scanner] expiring engagement %s after %ds",
-            engagement_id,
-            int(elapsed),
-        )
-
-        # Acquire per-engagement lock to prevent racing with _resume_graph.
-        lock = _get_engagement_lock(engagement_id)
-        if not lock.acquire(timeout=10):
-            logger.info(
-                "[timeout-scanner] engagement %s locked by resume; skipping this cycle",
-                engagement_id,
-            )
-            continue
-
-        try:
-            # Re-read under lock — a webhook resume may have already changed status.
-            fresh = store.get(engagement_id)
-            if not fresh or fresh.get("status") != "awaiting_results":
-                continue
-
-            from langgraph.errors import GraphInterrupt
-
-            fresh["status"] = "running"
-            fresh.pop("awaiting_since", None)
-            store.save(fresh)
-
-            compiled.invoke(
-                Command(resume={"timeout": True, "engagement_id": engagement_id}),
-                config={"configurable": {"thread_id": engagement_id}},
-            )
-            fresh["status"] = "completed"
-            fresh["finished_at"] = now_iso()
-            store.save(fresh)
-        except GraphInterrupt:
-            fresh["status"] = "awaiting_results"
-            fresh["awaiting_since"] = now_iso()
-            store.save(fresh)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "[timeout-scanner] failed to resume engagement %s",
-                engagement_id,
-            )
-            fresh["status"] = "failed"
-            fresh["error"] = "timeout-scanner resume failed"
-            fresh["finished_at"] = now_iso()
-            store.save(fresh)
-        finally:
-            lock.release()
+    kali = _state.get("kali")
+    if kali is not None:
+        kali.close()
+        logger.info("[shutdown] KaliClient closed")
 
 
 # ---------------------------------------------------------------------------

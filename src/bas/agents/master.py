@@ -18,8 +18,8 @@ Two LLM-backed entry points:
                       (master_revisions cap = 2: original brief + 1 revise).
 
   update_memory(memory, briefing, plan_summary, commit)
-      Synthesises an updated master memory dict after a successful commit:
-      structured keys for machine consumption + a `narrative` line of prose.
+      Legacy hook for intent-only memory. Confirmed facts are written from
+      analyse_results after target execution evidence is available.
 """
 
 from __future__ import annotations
@@ -31,8 +31,26 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMMessage, LLMProvider
+from .payload_catalog import PayloadCatalog
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_triage_ability_names(text: str) -> list[str]:
+    """Parse the triage model's plain-text ability list."""
+    if not text or text.strip().lower() == "false":
+        return []
+    names: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = line.lstrip("-*").strip()
+        if ". " in line[:4]:
+            line = line.split(". ", 1)[1].strip()
+        if line and line.lower() != "false" and line not in names:
+            names.append(line)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +163,8 @@ _MASTER_PLAN_PROMPT = (
     "  Pick exactly ONE phase from `available_phases`. Emit a PhaseBriefing\n"
     "  that the planner will use as its mission statement. Be specific about\n"
     "  what is already known, what is missing, and what constraints apply.\n"
+    "  Make sure to collect and gather the information for a given phase.\n"
+    "  If not achieved, go for a retry of the same phase with specific instructions on what to fix.\n"
     "\n"
     "  You will receive a `phase_history` array: a structured record of every\n"
     "  previously completed phase. Use it to:\n"
@@ -154,6 +174,15 @@ _MASTER_PLAN_PROMPT = (
     "    * Avoid duplicating work already done.\n"
     "    * Reference concrete findings (CIDRs, hosts, services, creds) from\n"
     "      prior phases in your `constraints` and `open_questions`.\n"
+    "\n"
+    "HIGH-INTEGRITY MASTER PLANNING INSTRUCTIONS:\n"
+    "  1. DO NOT SKIP AD-ENUMERATION: If network discovery reveals `network.has_domain_controller = true` or `recon.ad_present = true`,\n"
+    "     the very next phase briefing MUST be `ad-enumeration`. Never route directly to privilege escalation or credentials access without compiling an AD layout first.\n"
+    "  2. EXTRACT TARGET DATA DIRECTLY: Look closely at findings in `phase_history`. If you find a verified Domain Controller (DC) IP or a set of active subnets,\n"
+    "     explicitly populate them into the `constraints` property (e.g. \"DC IP is 192.168.127.11\") so the planner has a clear, non-generic target.\n"
+    "  3. SELF-RECOVERY ON FAILURE: If a previous phase failed (e.g., download timeouts or network blocks listed in `execution_summary` or `phase_history`),\n"
+    "     do NOT silently pass the same strategy. Under `issues_to_fix`, instruct the planner on specific alternative commands (e.g., \"do not download Mimikatz; use comsvcs registry mini-dumps instead\").\n"
+    "  4. KEEP CRITERIA TO THE LETTER: The objective must target the concrete unmet requirements from `COMPLETION CRITERIA`.\n"
     "\n"
     "RULES\n"
     "  * `phase` MUST be one of `available_phases` and MUST NOT be in\n"
@@ -167,16 +196,21 @@ _MASTER_PLAN_PROMPT = (
     "  * When writing constraints, include relevant data from phase_history\n"
     "    (e.g. discovered CIDRs, live hosts, creds obtained) so the planner\n"
     "    can reference them directly in commands.\n"
-    "\n"
-    "RETRY CONTEXT\n"
-    "  If `execution_summary` is provided, you are re-planning after actual\n"
-    "  execution results. Analyse the summary:\n"
+)
+
+_MASTER_PLAN_RETRY_CONTEXT = (
+    "\nRETRY CONTEXT\n"
+    "  `execution_summary` is provided — you are reviewing results from the\n"
+    "  phase that just executed. Analyse the summary:\n"
     "    * If critical objectives were NOT met but the cause is fixable\n"
-    "      (tool missing, placeholder token, timeout), set retry_same_phase=true\n"
-    "      and list the specific issues in issues_to_fix.\n"
-    "    * If objectives WERE met or the phase is unachievable, set done=true\n"
-    "      or pick a different phase.\n"
-    "    * Never retry the same phase more than 2 times — check phase_history\n"
+    "      (tool missing, placeholder token, timeout, permission denied), set retry_same_phase=true\n"
+    "      and list the specific issues in issues_to_fix. DO NOT advance to the next\n"
+    "      phase if the current phase's main objectives are incomplete.\n"
+    "    * If objectives WERE fully met, pick the NEXT uncompleted phase from\n"
+    "      `available_phases` (do NOT set done=true — there are more phases).\n"
+    "    * Set done=true ONLY when ALL phases in `available_phases` are in\n"
+    "      `completed_phases` and there is genuinely nothing left to do.\n"
+    "    * Never retry the same phase more than 3 times — check phase_history\n"
     "      for how many times the current phase appears with execution_outcome.\n"
 )
 
@@ -205,20 +239,22 @@ _MASTER_REVIEW_PROMPT = (
 
 _MEMORY_UPDATE_PROMPT = (
     "ROLE\n"
-    "  Master memory keeper. The planner's plan has been committed. Distil the\n"
-    "  plan's intent and the briefing's objective into a memory delta the next\n"
-    "  phase's planner will read.\n"
+    "  Master memory keeper. The planner's plan has been committed but target\n"
+    "  execution has NOT been analysed yet. Distil only intent, not confirmed\n"
+    "  facts.\n"
     "\n"
     "TASK\n"
-    "  Emit a MemoryUpdate. `facts` carries STRUCTURED keys (e.g. network,\n"
-    "  ad, creds, lateral) with sub-keys. `narrative` is one paragraph in the\n"
-    "  voice of an operator briefing a teammate.\n"
+    "  Emit a MemoryUpdate only for pending intent. `facts` may carry pending.*\n"
+    "  keys, but confirmed network/ad/creds/lateral facts must wait for\n"
+    "  analyse_results. `narrative` must say scheduled/planned, not confirmed.\n"
     "\n"
     "RULES\n"
     "  * Do not invent findings. Only record what the COMMANDS in the plan\n"
     "    would actually produce if executed successfully. If a command was\n"
     "    aspirational (e.g. 'discover live hosts'), record the EXPECTATION\n"
     "    keyed under `pending.<area>` rather than as a confirmed fact.\n"
+    "  * Do not write completed/confirmed/succeeded language before execution\n"
+    "    results have been parsed.\n"
     "  * Merge with existing memory: preserve prior keys unless this phase\n"
     "    explicitly supersedes them.\n"
 )
@@ -239,14 +275,15 @@ _MASTER_ANALYSE_TRIAGE_PROMPT = (
     "  Skip abilities that clearly timed out or had placeholder errors.\n"
     "\n"
     "OUTPUT\n"
-    "  A plain-text list of ability names, one per line. Nothing else.\n"
+    "  A plain-text list of ability names, one per line. Return false only if\n"
+    "  no raw output can help explain success, failure, or retry guidance.\n"
 )
 
 _MASTER_ANALYSE_EXTRACT_PROMPT = (
     "ROLE\n"
     "  Master memory keeper. You are reviewing ACTUAL execution output (stdout\n"
-    "  and stderr) from completed abilities. Your job is to extract confirmed\n"
-    "  facts from the output and record them in structured memory.\n"
+    "  and stderr) plus deterministic issue classifications. Your job is to\n"
+    "  extract confirmed facts and produce precise retry feedback.\n"
     "\n"
     "TASK\n"
     "  Emit a MemoryUpdate. `facts` carries STRUCTURED keys (e.g. network,\n"
@@ -256,12 +293,15 @@ _MASTER_ANALYSE_EXTRACT_PROMPT = (
     "RULES\n"
     "  * Only record facts that are CONFIRMED by output. Do not speculate.\n"
     "  * If exit_code != 0, note failures under `issues.{phase}` rather\n"
-    "    than as confirmed facts.\n"
+    "    than as confirmed facts. If exit_code == 0 but output contains an\n"
+    "    issue marker, also record it under `issues.{phase}`.\n"
     "  * If stdout contains IPs, CIDRs, hostnames, service names, usernames,\n"
     "    or file paths, extract them into structured keys.\n"
     "  * Merge with existing memory: preserve prior keys unless this output\n"
     "    explicitly supersedes them.\n"
     "  * Delete any `pending.*` keys that are now confirmed or contradicted.\n"
+    "  * For retries, include structured issue facts with ability, stage,\n"
+    "    kind, failed command, and a concrete command-level correction.\n"
 )
 
 
@@ -310,23 +350,21 @@ class MasterPolicy(Protocol):
         current_memory: dict,
     ) -> MemoryUpdate: ...
 
-    def build_feedback_payload(
-        self,
-        *,
-        issues: list,
-        current_plan: Any,
-        asset_map: dict,
-        operation_id: str,
-    ) -> list: ...
-
 
 class LLMMasterRouter:
     """Default master router. Three LLM round-trips per phase (plan, review,
     memory update). Each call uses structured output to keep parsing safe."""
 
-    def __init__(self, llm: LLMProvider, *, temperature: float = 0.1) -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        *,
+        temperature: float | None = None,
+        catalog: PayloadCatalog | None = None,
+    ) -> None:
         self._llm = llm
         self._temperature = temperature
+        self._catalog = catalog
 
     def plan_phase(
         self,
@@ -349,8 +387,13 @@ class LLMMasterRouter:
         }
         if execution_summary:
             payload["execution_summary"] = execution_summary
+        system = _MASTER_PLAN_PROMPT
+        if execution_summary:
+            system += _MASTER_PLAN_RETRY_CONTEXT
+        if self._catalog is not None:
+            system += self._catalog.render_master_summary()
         msgs = [
-            LLMMessage(role="system", content=_MASTER_PLAN_PROMPT),
+            LLMMessage(role="system", content=system),
             LLMMessage(
                 role="user",
                 content=(
@@ -360,7 +403,8 @@ class LLMMasterRouter:
             ),
         ]
         return self._llm.generate_structured(
-            msgs, PhaseBriefing, grounding="skip", temperature=self._temperature
+            msgs, PhaseBriefing, grounding="skip", temperature=self._temperature,
+            thinking="high",  # picking the next phase is the core strategic call
         )
 
     def review_plan(
@@ -391,7 +435,8 @@ class LLMMasterRouter:
             ),
         ]
         verdict = self._llm.generate_structured(
-            msgs, MasterDecision, grounding="skip", temperature=self._temperature
+            msgs, MasterDecision, grounding="skip", temperature=self._temperature,
+            thinking="high",  # reviewing an existing plan, not generating one
         )
         # Hard guard: if budget is exhausted the master MUST commit.
         if revise_budget <= 0 and verdict.action == "revise":
@@ -416,7 +461,7 @@ class LLMMasterRouter:
         plan_summary: list[dict],
     ) -> MemoryUpdate:
         payload = {
-            "current_memory": memory,
+            "memory": memory,
             "briefing": briefing.model_dump(),
             "plan_summary": plan_summary,
         }
@@ -425,14 +470,13 @@ class LLMMasterRouter:
             LLMMessage(
                 role="user",
                 content=(
-                    "Emit a MemoryUpdate JSON merging this phase's intent "
-                    "into master memory.\n\n"
+                    "Emit a MemoryUpdate JSON. Current memory + just-pushed plan:\n\n"
                     + json.dumps(payload, indent=2, default=str)
                 ),
             ),
         ]
         return self._llm.generate_structured(
-            msgs, MemoryUpdate, grounding="skip", temperature=0.0
+            msgs, MemoryUpdate, grounding="skip", temperature=self._temperature,
         )
 
     def analyse_results(
@@ -461,117 +505,42 @@ class LLMMasterRouter:
                 ),
             ),
         ]
-        try:
-            triage_text = self._llm.generate(
-                triage_msgs, grounding="skip", temperature=0.0
-            )
-            ability_names = [
-                line.strip().lstrip("- •*")
-                for line in triage_text.strip().splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            ]
-        except Exception as exc:
-            logger.warning("[master/analyse] triage step failed: %s; inspecting all", exc)
-            ability_names = []
+        triage = self._llm.chat(
+            triage_msgs, grounding="skip", temperature=self._temperature
+        ).strip()
 
-        # Collect detailed output for selected (or all) abilities
-        detailed_output = ""
-        if results_dir and ability_names:
-            parts: list[str] = []
-            for name in ability_names[:10]:  # cap to prevent context blowup
-                out = read_stage_output(results_dir, operation_id, name.strip())
-                if not out.startswith("[no matching"):
-                    parts.append(out)
-            detailed_output = "\n".join(parts)
+        selected_abilities = _parse_triage_ability_names(triage)
+        if not selected_abilities:
+            return MemoryUpdate(facts={}, narrative="No actionable intel found.")
 
-        if not detailed_output and results_dir:
-            # Fallback: grab output for ALL abilities (first 5)
-            from ..results import parse_operation_result
-            from ..tools.master_tools import _load_and_parse
-
-            _, op = _load_and_parse(results_dir, operation_id)
-            if op:
-                parts = []
-                for ab in op.abilities[:5]:
-                    out = read_stage_output(results_dir, operation_id, ab.name)
-                    if not out.startswith("[no matching"):
-                        parts.append(out)
-                detailed_output = "\n".join(parts)
+        selected_outputs: dict[str, str] = {}
+        if results_dir:
+            for ability_name in selected_abilities[:8]:
+                selected_outputs[ability_name] = read_stage_output(
+                    results_dir,
+                    operation_id,
+                    ability_name,
+                )[:6000]
 
         # Step B — extract confirmed facts from output
-        extract_payload = (
-            f"Structural summary:\n{structural_summary}\n\n"
-            f"Current memory:\n{json.dumps(current_memory, indent=2, default=str)}\n"
-        )
-        if detailed_output:
-            extract_payload += f"\nDetailed stage output:\n{detailed_output}\n"
-
+        extract_payload = {
+            "current_memory": current_memory,
+            "structural_summary": structural_summary,
+            "selected_ability_outputs": selected_outputs,
+        }
         extract_msgs = [
             LLMMessage(role="system", content=_MASTER_ANALYSE_EXTRACT_PROMPT),
-            LLMMessage(role="user", content=extract_payload),
+            LLMMessage(
+                role="user",
+                content=(
+                    "Emit a MemoryUpdate JSON capturing new findings.\n\n"
+                    + json.dumps(extract_payload, indent=2, default=str)
+                ),
+            ),
         ]
         return self._llm.generate_structured(
-            extract_msgs, MemoryUpdate, grounding="skip", temperature=0.0
+            extract_msgs, MemoryUpdate, grounding="skip", temperature=self._temperature,
         )
-
-    def build_feedback_payload(
-        self,
-        *,
-        issues: list,
-        current_plan: Any,
-        asset_map: dict,
-        operation_id: str,
-    ) -> list:
-        """Build a list of AIStageChange dicts for failed stages.
-
-        For each issue, look up the corrected command from the new plan and
-        pair it with the original stage_id from the asset_map.
-        """
-        from ..client.feedback import AIStageChange
-
-        stage_id_map = asset_map.get("stage_id_map", {})
-        ability_name_to_id = asset_map.get("ability_name_to_id", {})
-
-        # Build lookup: {(ability_name, stage_name) -> new_command} from plan
-        new_commands: dict[tuple[str, str], str] = {}
-        for gen in current_plan.abilities:
-            for stage in gen.stages:
-                new_commands[(gen.ability.name, stage.stage_name)] = (
-                    stage.command_template or ""
-                )
-
-        changes: list[AIStageChange] = []
-        seen: set[tuple[str, str]] = set()  # (ability_name, stage_name)
-
-        for issue in issues:
-            key = (issue.ability_name, issue.stage_name)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            # Resolve original IDs
-            ab_id = ability_name_to_id.get(issue.ability_name, issue.ability_id)
-            sid = stage_id_map.get(issue.ability_name, {}).get(
-                issue.stage_name, issue.stage_id
-            )
-
-            new_cmd = new_commands.get(key)
-            if not new_cmd:
-                continue  # no corrected command in the new plan
-
-            changes.append(
-                AIStageChange(
-                    operation_id=operation_id,
-                    ability_id=ab_id,
-                    stage_id=sid,
-                    suggested_command_template=new_cmd,
-                    reason=f"{issue.kind.value}: {issue.detail[:200]}",
-                    confidence=0.9,
-                    apply_immediately=True,
-                )
-            )
-
-        return changes
 
 
 class StaticMasterRouter:
@@ -631,13 +600,3 @@ class StaticMasterRouter:
             facts={},
             narrative=f"static analysis of operation {operation_id}",
         )
-
-    def build_feedback_payload(
-        self,
-        *,
-        issues: list,
-        current_plan: Any,
-        asset_map: dict,
-        operation_id: str,
-    ) -> list:
-        return []  # static router never generates feedback

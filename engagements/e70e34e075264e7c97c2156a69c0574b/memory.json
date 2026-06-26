@@ -1,0 +1,174 @@
+{
+  "run_id": "e70e34e075264e7c97c2156a69c0574b",
+  "updated_at": "2026-06-25T07:47:58.289171+00:00",
+  "label": "analyse/credaccess/4dcc65aa",
+  "campaign_progress": {
+    "current_phase": "credaccess",
+    "completed_phases": [
+      "discovery",
+      "privesc"
+    ],
+    "available_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "ad-enumeration",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 4,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Perform initial host and service discovery to identify reachable targets and determine if an Active Directory domain is present.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1046",
+          "T1033",
+          "T1518",
+          "T1018",
+          "T1016"
+        ],
+        "ability_names": [
+          "Machine Context Check",
+          "Local Subnet Identification",
+          "Scan Feasibility / Nmap Existence Check",
+          "Local Subnet Host Discovery (PS Fallback)",
+          "Dynamic Service and Port Profiler",
+          "Domain Controller and Pivot Evaluation Gate"
+        ],
+        "execution_outcome": {
+          "operation_id": "5f2b241f-0fff-44d8-8bd7-03358e2ee5c2",
+          "abilities_passed": 6,
+          "abilities_failed": 0,
+          "issues_detected": []
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "ad-enumeration",
+        "objective": "Perform comprehensive Active Directory domain enumeration to map users, groups, computer objects, trust relationships, and potential certificate-based vectors.",
+        "outcome": "committed",
+        "skills_used": [
+          "enumerating-active-directory"
+        ],
+        "techniques_used": [
+          "T1018"
+        ],
+        "ability_names": [
+          "Comprehensive ADSI and LDAP Enumeration"
+        ],
+        "execution_outcome": {
+          "operation_id": "8a9e747c-dac3-4f23-a90a-907c78f0429c",
+          "abilities_passed": 1,
+          "abilities_failed": 0,
+          "issues_detected": [
+            "type_not_found",
+            "error_marker"
+          ]
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "privesc",
+        "objective": "Identify and exploit local privilege escalation vectors on CASTELBLACK to transition from our current user context to local SYSTEM or administrator.",
+        "outcome": "committed",
+        "skills_used": [
+          "escalating-privileges"
+        ],
+        "techniques_used": [
+          "T1033"
+        ],
+        "ability_names": [
+          "P0 - Current Privilege State Check"
+        ],
+        "execution_outcome": {
+          "operation_id": "09137595-17e8-4651-80c4-b7281a53c21a",
+          "abilities_passed": 1,
+          "abilities_failed": 0,
+          "issues_detected": []
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "credaccess",
+        "objective": "Obtain valid domain credentials or high-privilege hashes on CASTELBLACK to escalate privileges or enable lateral movement.",
+        "outcome": "committed",
+        "skills_used": [
+          "accessing-credentials"
+        ],
+        "techniques_used": [
+          "T1558.004",
+          "T1558.003"
+        ],
+        "ability_names": [
+          "Harvest Local Kerberos Tickets",
+          "Native PowerShell Kerberoasting",
+          "Native AS-REP Roast Discovery"
+        ],
+        "execution_outcome": {
+          "operation_id": "4dcc65aa-0a8a-4e88-86ff-1a02f6b4c323",
+          "abilities_passed": 2,
+          "abilities_failed": 1,
+          "issues_detected": [
+            "error_marker",
+            "psh_parse_error"
+          ]
+        },
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {
+    "narratives": [
+      {
+        "phase": "discovery",
+        "ts": "2026-06-25T06:37:13.403670+00:00",
+        "text": "We have structured an initial discovery plan to establish situational awareness from our foothold on CASTELBLACK (192.168.187.141). This plan relies entirely on native commands and lightweight PowerShell scripts to dynamically resolve the local network scope, ping-sweep the active subnet, and profile open ports across reachable hosts. Our primary objective is to seek out Kerberos and LDAP service footprints (ports 88, 389, and 636) to confirm the existence and IP address of any Active Directory Domain Controllers. All data will accumulate in C:\\Windows\\Temp\\bas\\, which will ultimately guide the next phase's planner on whether to initiate domain enumeration or pursue local privilege escalation."
+      },
+      {
+        "phase": "ad-enumeration",
+        "ts": "2026-06-25T06:51:07.408583+00:00",
+        "text": "We have kicked off a comprehensive Active Directory enumeration sweep from CASTELBLACK, targeting the north.sevenkingdoms.local Domain Controller at 192.168.127.11. This phase relies on a heavily consolidated PowerShell script executing safe, native ADSI/LDAP queries alongside pre-staged binaries like SharpHound, Rubeus, and Certify. Our pending collections, outputting directly to C:\\Windows\\Temp\\bas, are designed to pull users, delegation configurations, Group Policies, LAPS configurations, and ADCS certificate templates without generating disruptive network noise. Once complete, we will have a complete map of domain attack paths, group structures, and cryptographic weaknesses to fuel our subsequent lateral movement strategy."
+      },
+      {
+        "phase": "ad-enumeration",
+        "ts": "2026-06-25T07:24:57.046903+00:00",
+        "text": "The Active Directory enumeration task on CASTELBLACK confirmed the domain north.sevenkingdoms.local (BaseDN: DC=north,DC=sevenkingdoms,DC=local) and the Domain Controller IP address 192.168.127.11. However, the subsequent enumeration queries (including Users, Kerberoasting, AS-REP Roasting, Delegation, and ADCS) failed because the '[DirectorySearcher]' .NET type could not be found, indicating a potential restriction or environmental limitation on the host."
+      },
+      {
+        "phase": "privesc",
+        "ts": "2026-06-25T07:29:29.939540+00:00",
+        "text": "Having encountered restrictions with local .NET directory searching that stalled our domain-level Active Directory enumeration, we are pivoting to investigate local privilege escalation options on our current foothold, CASTELBLACK (192.168.187.141). We have initiated a minimal, fileless check of our current user context, groups, and integrity level using standard system utilities. This baseline information will determine whether we are already in an elevated context or identify specific token privileges and local group memberships that can be leveraged to transition to local SYSTEM or administrative status."
+      },
+      {
+        "phase": "privesc",
+        "ts": "2026-06-25T07:30:31.425049+00:00",
+        "text": "The local privilege escalation checks on the CASTELBLACK foothold (192.168.187.141) completed successfully, confirming that we are currently operating under the domain-user account 'north\\test' with SID 'S-1-5-21-1001219898-3397012194-2462155686-1124'. This identity mapping establishes the baseline context for identifying further local privileges or group memberships to support escalation paths."
+      },
+      {
+        "phase": "credaccess",
+        "ts": "2026-06-25T07:46:51.343992+00:00",
+        "text": "Pivoting to credential access from our foothold on CASTELBLACK (192.168.187.141), we have scheduled native PowerShell checks to harvest local Kerberos tickets and perform Kerberoasting and AS-REP roasting. Since earlier phases indicated restrictions using ADSI directory searchers, our Kerberoasting script includes an active fallback list targeting known service principal names (like MSSQL and HTTP on SQL01 and WEB01) to ensure we still attempt ticket requests even if LDAP searches fail. All outputs are being routed to C:\\Windows\\Temp\\bas\\cred_access\\ for offline extraction and potential cracking."
+      },
+      {
+        "phase": "credaccess",
+        "ts": "2026-06-25T07:47:58.287645+00:00",
+        "text": "During the credential access phase on CASTELBLACK, we confirmed the presence of 5 cached Kerberos tickets for the 'test' user, including a TGT for the NORTH.SEVENKINGDOMS.LOCAL domain using AES-256 encryption. Additionally, our roasting checks successfully identified 'brandon.stark' as a roastable domain account. The custom Kerberoasting fallback script failed to execute due to a PowerShell syntax error, preventing service-specific TGS requests from completing."
+      }
+    ]
+  }
+}

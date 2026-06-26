@@ -1,0 +1,34 @@
+{
+  "ability_id": "99b8cc3d-195c-4e18-944c-24859c53b0ae",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T10:21:05.678070+00:00",
+  "ability": {
+    "name": "Step 7 - Domain Controller Verification",
+    "description": "Inspect open service maps, detect the Domain Controller, query ADSI to dynamically extract Base DN, and output results.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "1d55cfc5b13c4606b05f392cdd678e98"
+  },
+  "stages": [
+    {
+      "stage_name": "Execution",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $dcIp = $null; try { $domainObj = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain(); $dc = $domainObj.DomainControllers[0]; $dcIp = $dc.IPAddress; Write-Output \"ADSI_DC_IP: $dcIp\" } catch { Write-Output \"WARN: ADSI GetCurrentDomain failed, parsing step 5 output\" }; if (-not $dcIp -and (Test-Path \"$d\\step5.txt\")) { $lines = Get-Content \"$d\\step5.txt\"; foreach ($line in $lines) { if ($line -match \"OPEN:\\s+(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}):(88|389)\") { $dcIp = $Matches[1]; break } } }; if ($dcIp) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$dcIp\"); $dn = $de.Properties['defaultNamingContext'].Value; $dnsHost = $de.Properties['dnsHostName'].Value; if ($dn) { Write-Output \"DC_FOUND: true\"; Write-Output \"DC_IP: $dcIp\"; Write-Output \"BASE_DN: $dn\"; Write-Output \"DC_HOSTNAME: $dnsHost\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"ERROR_LDAP: $_\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\dc_gate.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies whether a DC is present and extracts its Base DN dynamically to satisfy the gateway condition before starting AD-enumeration.",
+  "provider": "BAS-Internal",
+  "cited_urls": []
+}

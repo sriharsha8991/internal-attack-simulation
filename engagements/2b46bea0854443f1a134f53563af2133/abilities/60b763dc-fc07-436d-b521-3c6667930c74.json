@@ -1,0 +1,34 @@
+{
+  "ability_id": "60b763dc-fc07-436d-b521-3c6667930c74",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T06:26:01.355211+00:00",
+  "ability": {
+    "name": "Step 4 \u2014 Host Discovery Sweep (Multi-Adapter)",
+    "description": "Perform an active sweep using Nmap or a robust PowerShell network discovery loop across all identified active network subnets.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "host-sweep"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "host_sweep",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $cidrFile = \"$d/network_cidrs.txt\"; if (-not (Test-Path $cidrFile)) { throw \"network_cidrs.txt not found. Run Step 1 first.\" }; $cidrs = Get-Content $cidrFile; $nmapCheck = Get-Content \"$d/nmap_check.txt\" -ErrorAction SilentlyContinue | Out-String; $nmapAvailable = $nmapCheck -match \"NMAP_AVAILABLE: true\"; $hosts = [System.Collections.Generic.HashSet[string]]::new(); if ($nmapAvailable) { Write-Output \"Using NMAP path for host discovery\"; foreach ($cidr in $cidrs) { $cleanCidr = $cidr.Trim(); if ($cleanCidr) { $sweepOut = \"$d/sweep_nmap_$($cleanCidr -replace '[./]', '_')\"; nmap -sn -PE -PP -PS21,22,80,135,139,443,445,3389,5985 -PA80,443 --min-rate 300 --max-retries 1 -oA $sweepOut $cleanCidr 2>$null; if (Test-Path \"$sweepOut.gnmap\") { Get-Content \"$sweepOut.gnmap\" | ForEach-Object { if ($_ -match \"Host: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}) \\(\\)[\\s\\t]+Status: Up\") { $null = $hosts.Add($Matches[1]) } } } } } } else { Write-Output \"Using PowerShell path for host discovery\"; foreach ($cidr in $cidrs) { $cleanCidr = $cidr.Trim(); if (-not $cleanCidr) { continue }; $networkParts = $cleanCidr -split '/'; $ipParts = $networkParts[0] -split '\\.'; $prefix = \"$($ipParts[0]).$($ipParts[1]).$($ipParts[2]).\"; try { arp -a 2>$null | ForEach-Object { if ($_ -match \"($($prefix.Replace('.', '\\.'))\\d{1,3})\") { $null = $hosts.Add($Matches[1]) } } } catch {}; 1..254 | ForEach-Object { $ip = \"$prefix$_\"; if ($hosts -notcontains $ip) { if (Test-Connection -ComputerName $ip -Count 1 -Quiet -TimeoutMilliSecs 500 -ErrorAction SilentlyContinue) { $null = $hosts.Add($ip) } } }; 1..254 | ForEach-Object { $ip = \"$prefix$_\"; if ($hosts -notcontains $ip) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $c = $tcp.BeginConnect($ip, 445, $null, $null); if ($c.AsyncWaitHandle.WaitOne(500, $false)) { $tcp.EndConnect($c); $null = $hosts.Add($ip) } } catch {} finally { $tcp.Dispose() } } } } }; $unique = $hosts | Sort-Object; $unique | Out-File \"$d/live_hosts.txt\" -Encoding ascii; $unique | ConvertTo-Json | Out-File \"$d/live_hosts.json\" -Encoding ascii; Write-Output \"LIVE_HOST_COUNT: $($unique.Count)\"; $unique | ForEach-Object { Write-Output \"HOST: $_\" } } catch { Write-Output \"ERROR: step4_host_discovery $($_.Exception.Message)\"; Write-Output \"LIVE_HOST_COUNT: 0\" }) | Tee-Object -FilePath $d/step4_out.txt",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Dynamically sweep all subnets for active targets using Nmap if present, else optimized native PowerShell (ARP/ICMP/TCP fallback).",
+  "provider": "builtin",
+  "cited_urls": []
+}

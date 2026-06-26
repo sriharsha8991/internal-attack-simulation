@@ -1,0 +1,20 @@
+{
+  "adversary_id": "295d7dd4-ac22-4f04-973e-85157b4a24db",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-25T07:46:37.371223+00:00",
+  "adversary": {
+    "name": "Domain Credential Harvester",
+    "description": "APT style local ticket harvesting, native Kerberoasting, and AS-REP Roast discovery.",
+    "profile": "APT-Style-Domain-User-Harvester",
+    "execution_strategy": "sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "linked_ability_ids": [
+    "202bba1d-37cb-454b-b8f0-4b6160def8d0",
+    "476e45d3-690b-496f-bf69-725bae29380a",
+    "bf8dafee-16c7-464b-9e33-f1519c13a662"
+  ]
+}

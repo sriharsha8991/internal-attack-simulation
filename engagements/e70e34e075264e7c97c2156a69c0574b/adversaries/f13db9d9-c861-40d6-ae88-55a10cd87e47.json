@@ -1,0 +1,23 @@
+{
+  "adversary_id": "f13db9d9-c861-40d6-ae88-55a10cd87e47",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T06:36:55.882021+00:00",
+  "adversary": {
+    "name": "APT-Environment-Discovery-Operator",
+    "description": "An adversary specialized in thorough, quiet, and robust network/environment discovery from a freshly acquired Windows foothold, dynamically mapping subnets and routing gates safely before pivot actions.",
+    "profile": "APT-Discovery",
+    "execution_strategy": "sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "linked_ability_ids": [
+    "e3b6652b-03f9-4eb6-a13f-33d0ca3af53a",
+    "a8029005-0770-49ac-93ff-024d6a07913a",
+    "eb31f09f-c44f-4d9c-9d84-51b952e3f96a",
+    "23a15c4f-e247-45e1-a0ae-e81b65d20df5",
+    "0a45e7a1-6b0f-45ac-8bc6-649b0f5f9ba6",
+    "e8c9292e-1a59-48c0-8a0e-112a24f032a8"
+  ]
+}

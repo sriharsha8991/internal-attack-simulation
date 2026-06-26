@@ -1,0 +1,33 @@
+{
+  "ability_id": "eb31f09f-c44f-4d9c-9d84-51b952e3f96a",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T06:36:51.294031+00:00",
+  "ability": {
+    "name": "Scan Feasibility / Nmap Existence Check",
+    "description": "Inspect environment pathways to verify if Nmap is natively installed or available on PATH.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1518",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "nmap_check",
+      "stage_order": 3,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $nmapPath = Get-Command nmap -ErrorAction SilentlyContinue; if ($nmapPath) { Write-Output \"NMAP_AVAILABLE: true\" } else { Write-Output \"NMAP_AVAILABLE: false\" } } catch { Write-Output \"NMAP_AVAILABLE: false\" }) | Tee-Object -FilePath $d\\nmap_check.txt",
+      "timeout_seconds": 30,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Checking the footprint of tools like Nmap informs the runner on whether we can perform low-overhead, native tool-based scans or if we must fall back immediately to lightweight PowerShell scripts.",
+  "provider": "Native",
+  "cited_urls": []
+}

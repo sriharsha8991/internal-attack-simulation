@@ -1,0 +1,34 @@
+{
+  "ability_id": "64802d38-9e7f-4c5d-9a18-905602acd09c",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:28:17.324572+00:00",
+  "ability": {
+    "name": "Step 0 - Machine Context Check (Windows)",
+    "description": "Performs local context check including identity, domain status, active privilege string parsing, and active EDR/AV product enumeration.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": "read-only",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "context-check"
+    ],
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "stages": [
+    {
+      "stage_name": "Execution Check",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $av=@(); try { $av_wmi=Get-WmiObject -Namespace root\\SecurityCenter2 -Class AntiVirusProduct -ErrorAction SilentlyContinue; if($av_wmi){$av+=$av_wmi.displayName} } catch {}; $running_services=Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Running' }; $edr_keywords=@('defender','crowdstrike','carbon','sentinel','cylance','cortex','sysmon'); foreach($keyword in $edr_keywords){ if($running_services | Where-Object { $_.Name -like \"*$keyword*\" -or $_.DisplayName -like \"*$keyword*\" }){ $av+=$keyword } }; $av_json=$av | ConvertTo-Json -Compress; $privs=@(); try { $raw_privs=whoami /priv; foreach($line in $raw_privs){ if($line -match '(Se\\w+Privilege)'){ $privs+=$Matches[1] } } } catch {}; $privs_json=$privs | ConvertTo-Json -Compress; $cs=Get-WmiObject Win32_ComputerSystem; $dom=$cs.PartOfDomain; $dn=$cs.Domain; $hn=$env:COMPUTERNAME; Write-Output \"PLATFORM: windows\"; Write-Output \"HOSTNAME: $hn\"; Write-Output \"DOMAIN_JOINED: $dom\"; Write-Output \"DOMAIN: $dn\"; Write-Output \"host.av_edr: $av_json\"; Write-Output \"host.token_privileges: $privs_json\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step0.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Required to cleanly parse and output host.av_edr and privilege array tokens (host.token_privileges) per the evaluator requirements.",
+  "provider": "Lead Red Team Planner",
+  "cited_urls": []
+}

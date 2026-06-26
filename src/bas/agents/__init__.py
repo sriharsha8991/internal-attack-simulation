@@ -20,6 +20,7 @@ from .master import (
     PhaseBriefing,
     StaticMasterRouter,
 )
+from .payload_catalog import PayloadCatalog
 from .prompt_profiles import (
     PromptProfile,
     all_profiles,
@@ -56,6 +57,7 @@ __all__ = [
     "PhaseBriefing",
     "MasterDecision",
     "MemoryUpdate",
+    "PayloadCatalog",
     "PromptProfile",
     "get_profile",
     "register_profile",

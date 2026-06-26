@@ -1,0 +1,20 @@
+{
+  "adversary_id": "4538ddb0-7818-4ab4-9a89-e2c9712ee9f0",
+  "skill": "moving-laterally",
+  "saved_at": "2026-06-24T10:17:11.978482+00:00",
+  "adversary": {
+    "name": "APT Lateral Movement Agent",
+    "description": "Sophisticated APT agent designed to perform stealthy lateral movement from CASTELBLACK to winterfell.north.sevenkingdoms.local.",
+    "profile": "APT-Lateral",
+    "execution_strategy": "Pre-flight checks followed by NetExec validation and execution.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "a9775c6b-99ee-4e04-adb6-447b896474cc",
+    "b0c23e0f-f550-48f7-b836-fe1856e07cee",
+    "ed251a4b-6161-4bcb-905a-82b8a4deae45"
+  ]
+}

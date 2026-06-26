@@ -1,0 +1,23 @@
+{
+  "adversary_id": "436b72b8-5259-4e7d-845c-d2f697e800f3",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:00:34.199797+00:00",
+  "adversary": {
+    "name": "Phase A Network Discovery Strategy",
+    "description": "Domain-aware network discovery with multi-subnet sweeps, robust host alive mappings, service profiling, and DC gating.",
+    "profile": "APT-Discovery",
+    "execution_strategy": "sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "linked_ability_ids": [
+    "3cb433b3-cbd8-4461-8367-3a3add66ffc9",
+    "fd9552ca-abdb-4118-9b19-1d981539c28f",
+    "a62ddf8c-ce6c-47b8-9d71-90599d1ea00d",
+    "42ba1b7f-650c-4ca1-9ab1-91231a1c64ac",
+    "dab02958-091f-45dd-9889-e39b60e61fb1",
+    "2d99580b-96e6-4f83-95d2-7d405daff0a1"
+  ]
+}

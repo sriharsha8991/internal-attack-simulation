@@ -1,0 +1,43 @@
+{
+  "run_id": "1d55cfc5b13c4606b05f392cdd678e98",
+  "status": "completed",
+  "started_at": "2026-06-25T09:57:55.803156+00:00",
+  "finished_at": "2026-06-26T05:25:34.788585+00:00",
+  "request": {
+    "phases": null,
+    "environment": {
+      "id": "82e01037-11db-4b59-a79c-661b3838cfea",
+      "name": "Test Prod"
+    },
+    "target": {
+      "platform": "windows"
+    },
+    "safety": {
+      "acks": [],
+      "simulations": []
+    },
+    "max_iterations": 20,
+    "dry_run": false
+  },
+  "state": null,
+  "error": null,
+  "skill_order": [
+    "discovery",
+    "ad-enumeration",
+    "privesc",
+    "credaccess",
+    "lateral",
+    "persistence",
+    "defevasion",
+    "impact"
+  ],
+  "foothold": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "environment_name": "Test Prod",
+    "agent_id": "277f297f",
+    "hostname": "CASTELBLACK",
+    "platform": "windows",
+    "ip_address": "192.168.187.141",
+    "display_status": "offline"
+  }
+}

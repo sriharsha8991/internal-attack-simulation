@@ -1,0 +1,33 @@
+{
+  "ability_id": "2eed77af-42fa-44f9-9a2e-a443eb4b1483",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:05:53.123674+00:00",
+  "ability": {
+    "name": "Step 7 - Domain Controller Gate",
+    "description": "Evaluates the gathered service map, identifies any DCs, outputs execution conditions, and writes state variables.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "router"
+    ],
+    "created_by": "ai",
+    "engagement_id": "37f14cc91cec41b3a0c3afeb9edddfa6"
+  },
+  "stages": [
+    {
+      "stage_name": "Decide Route",
+      "stage_order": 8,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $has_dc = $false; $dc_ip = \"\"; $base_dn = \"\"; $dc_hostname = \"\"; $ldap_files = Get-ChildItem $d -Filter \"base_dn_*.txt\"; if ($ldap_files.Count -gt 0) { $has_dc = $true; $first_file = $ldap_files[0]; $base_dn = Get-Content $first_file.FullName; if ($first_file.Name -match \"base_dn_(.+)\\.txt\") { $dc_ip = $Matches[1] }; $host_file = \"$d\\dns_hostname_$dc_ip.txt\"; if (Test-Path $host_file) { $dc_hostname = Get-Content $host_file } } else { $services_file = \"$d\\services.json\"; if (Test-Path $services_file) { $services = Get-Content $services_file -Raw | ConvertFrom-Json; foreach ($ip in $services.PSObject.Properties.Name) { $ports = $services.$ip | ForEach-Object { $_.port }; if ($ports -contains 88 -and ($ports -contains 389 -or $ports -contains 445)) { $has_dc = $true; $dc_ip = $ip; break } } } }; if ($has_dc) { Write-Output \"network.has_domain_controller=true\"; Write-Output \"recon.ad_present=true\"; Write-Output \"network.dc_ip=$dc_ip\"; if ($base_dn) { Write-Output \"domain.base_dn=$base_dn\" }; if ($dc_hostname) { Write-Output \"domain.dc_hostname=$dc_hostname\" }; Write-Output \"RECOMMENDED_NEXT=ad-enumeration\"; Write-Output \"PHASE_DONE=false\" } else { Write-Output \"network.has_domain_controller=false\"; Write-Output \"recon.ad_present=false\"; Write-Output \"RECOMMENDED_NEXT=establishing-persistence\"; Write-Output \"PHASE_DONE=true\" } } catch { Write-Output \"network.has_domain_controller=false\"; Write-Output \"recon.ad_present=false\"; Write-Output \"ERROR: step7 failed - $_\"; Write-Output \"RECOMMENDED_NEXT=establishing-persistence\" } | Tee-Object -FilePath $d\\dc_gate.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Parses and outputs the decisive routing gate keys to direct Phase B AD enumeration.",
+  "provider": "specialist",
+  "cited_urls": []
+}

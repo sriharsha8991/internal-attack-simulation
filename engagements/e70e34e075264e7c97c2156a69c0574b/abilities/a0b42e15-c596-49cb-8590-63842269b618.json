@@ -1,0 +1,34 @@
+{
+  "ability_id": "a0b42e15-c596-49cb-8590-63842269b618",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-25T07:29:17.212585+00:00",
+  "ability": {
+    "name": "P0 - Current Privilege State Check",
+    "description": "Executes native whoami queries to determine if the session is already running as SYSTEM or Domain Admin, or if a UAC bypass is required.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": null,
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "privesc-p0"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "Run Native Whoami Queries Fileless",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$($error.Clear(); try { whoami /all; whoami /groups } catch { Write-Output \"ERROR: $_\" })",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Determines current integrity and domain privileges filelessly to decide if further escalation steps or tools are required, addressing evaluator feedback to avoid early disk writes and keeping P0 as a single critical decision gate.",
+  "provider": "native",
+  "cited_urls": []
+}

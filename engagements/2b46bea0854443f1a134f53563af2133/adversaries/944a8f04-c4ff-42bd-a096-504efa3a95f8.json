@@ -1,0 +1,18 @@
+{
+  "adversary_id": "944a8f04-c4ff-42bd-a096-504efa3a95f8",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-24T07:30:46.069647+00:00",
+  "adversary": {
+    "name": "APT Privilege Escalation Operator",
+    "description": "Emulates an advanced threat actor conducting systematic privilege checks and local privilege escalation on Windows hosts.",
+    "profile": "APT",
+    "execution_strategy": "Sequential verification followed by targeted exploitation based on privileges",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "5fc9d2c3-2d86-4c67-bfdb-6a87b7bb5e31"
+  ]
+}

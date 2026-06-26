@@ -1,0 +1,36 @@
+{
+  "ability_id": "24f989e6-6dff-4573-a7d9-25b7bea544bc",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:05.543470+00:00",
+  "ability": {
+    "name": "Machine Context Check",
+    "description": "Perform Step 0 machine context check dynamically determining the current platform, local adapters, and privileges.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": "low",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "recon"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "Context Check",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $id = whoami /all; $cs = Get-WmiObject Win32_ComputerSystem; $dom = $cs.PartOfDomain; $dn = $cs.Domain; $os = (Get-WmiObject Win32_OperatingSystem).Caption; $hn = $env:COMPUTERNAME; Write-Output \"PLATFORM: windows\"; Write-Output \"HOSTNAME: $hn\"; Write-Output \"DOMAIN_JOINED: $dom\"; Write-Output \"DOMAIN: $dn\"; Write-Output \"OS: $os\"; Write-Output \"--- WHOAMI ---\"; $id } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step0.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Step 0 is critical to determine domain membership and identify multi-homed adapters silently.",
+  "provider": "Lead Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1033/"
+  ]
+}

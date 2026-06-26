@@ -1,0 +1,36 @@
+{
+  "ability_id": "095c7b18-a6fc-4fc9-b98d-bae487fac3dd",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:08.081434+00:00",
+  "ability": {
+    "name": "Targeted Service Port Scan",
+    "description": "Conduct dynamic TcpClient connection scanning against known directory service and controller ports on verified live targets.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "low",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "recon"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "Service Scan",
+      "stage_order": 5,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $hostsFile = 'C:\\Windows\\Temp\\bas\\live_hosts.txt'; if (!(Test-Path $hostsFile)) { throw 'live_hosts.txt missing' }; $hosts = Get-Content $hostsFile; $ports = @(88,389,445); $results = @(); foreach ($ip in $hosts) { foreach ($port in $ports) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $c = $tcp.BeginConnect($ip, $port, $null, $null); if ($c.AsyncWaitHandle.WaitOne(200, $false)) { $tcp.EndConnect($c); Write-Output \"OPEN: $ip`:$port\"; $results += @{ip=$ip; port=$port; service=$(if($port -eq 88){'kerberos'}elseif($port -eq 389){'ldap'}else{'microsoft-ds'})} } } catch {} finally { $tcp.Dispose() } } }; $results | ConvertTo-Json | Out-File C:\\Windows\\Temp\\bas\\services.json -Encoding ascii } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step5.txt",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Allows targeted enumeration of DC ports without noisy massive sweeps.",
+  "provider": "Lead Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1046/"
+  ]
+}

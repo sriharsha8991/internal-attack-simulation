@@ -94,7 +94,7 @@ class AbilityStageCreate(BaseModel):
     stage_order: int
     executor: str | None = None
     command_template: str | None = None
-    timeout_seconds: int | None = None
+    timeout_seconds: int | None = Field(default=900)
     payload_id: UUID | None = None
 
 
@@ -152,6 +152,8 @@ class PayloadMetadata(BaseModel):
     platform: str | None = None
     type: str | None = None
     risk_classification: str | None = None
+    description: str | None = None
+    category: str | None = None
     created_at: datetime | None = None
 
 

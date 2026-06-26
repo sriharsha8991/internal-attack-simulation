@@ -1,0 +1,31 @@
+{
+  "ability_id": "6de10deb-3445-48f9-be65-04db9fd551f4",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:55:13.653145+00:00",
+  "ability": {
+    "name": "SharpGPOAbuse Verification",
+    "description": "Executes SharpGPOAbuse to verify group policy modification capability and retrieve configuration state.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1484.001",
+    "platform": "windows",
+    "impact_type": null,
+    "default_severity": null,
+    "requires_approval": false,
+    "tags": null,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Run SharpGPOAbuse Check",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { SharpGPOAbuse.exe } catch { $_ }) | Tee-Object -FilePath $d/gpo_abuse.txt",
+      "timeout_seconds": 900,
+      "payload_id": "73a64537-e21a-49c0-aa39-053108e651f1"
+    }
+  ],
+  "rationale": "Verifies GPO capability using the requested SharpGPOAbuse.exe pre-uploaded binary payload in a non-disruptive query sequence.",
+  "provider": "SharpGPOAbuse",
+  "cited_urls": []
+}

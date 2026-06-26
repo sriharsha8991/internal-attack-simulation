@@ -1,0 +1,36 @@
+{
+  "ability_id": "d0b5b0a6-883f-40a6-aa15-4d19d0d2d50f",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:08.701338+00:00",
+  "ability": {
+    "name": "DC Verification and Router Gate",
+    "description": "Check discovered services to confirm Domain Controller availability and determine the path to Phase B.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "low",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "recon"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "DC Verification",
+      "stage_order": 6,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $de = New-Object System.DirectoryServices.DirectoryEntry('LDAP://192.168.187.141'); $dn = $de.Properties['defaultNamingContext'].Value; if ($dn) { Write-Output \"DC_FOUND: true\"; Write-Output \"BASE_DN: $dn\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\dc_gate.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies Active Directory connectivity and routes the flow to Phase B (ad-enumeration) or lateral movement.",
+  "provider": "Lead Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1018/"
+  ]
+}

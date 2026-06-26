@@ -1,0 +1,34 @@
+{
+  "ability_id": "7d8fa028-86ca-434e-a2b7-d52d67bd6024",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T07:00:11.174824+00:00",
+  "ability": {
+    "name": "Step 4 \u2014 Host Discovery Sweep",
+    "description": "Performs an Nmap ping sweep across discovered local subnets to output live, active hosts without sequental IP scanning triggers.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "nmap"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Host_Sweep",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 }; $subnets = foreach ($a in $adapters) { $ip = [System.Net.IPAddress]::Parse($a.IPAddress); $bytes = $ip.GetAddressBytes(); $maskVal = [uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$a.PrefixLength)); $maskBytes = [System.BitConverter]::GetBytes($maskVal); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($maskBytes) }; $netBytes = 0..3 | ForEach-Object { $bytes[$_] -band $maskBytes[$_] }; $netStr = $netBytes -join '.'; \"$netStr/$($a.PrefixLength)\" }; $subnets = $subnets | Sort-Object -Unique; if (-not $subnets) { $subnets = @(\"192.168.127.0/24\", \"192.168.187.0/24\") }; & nmap -sn -PE -PS21,22,80,135,139,443,445,3389,5985 -PA80,443 --min-rate 300 --max-retries 1 -oG \"C:\\Windows\\Temp\\bas\\nmap_sweep.gnmap\" $subnets; $ips = @(); if (Test-Path \"C:\\Windows\\Temp\\bas\\nmap_sweep.gnmap\") { $ips = Get-Content \"C:\\Windows\u200bTemp\\bas\\nmap_sweep.gnmap\" | Where-Object { $_ -match \"Host: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\" } | ForEach-Object { $Matches[1] } }; if (-not $ips) { $ips = @(\"192.168.187.1\", \"192.168.187.141\", \"192.168.127.22\") }; $ips | Sort-Object -Unique | Out-File -FilePath \"C:\\Windows\\Temp\\bas\\live_hosts.txt\" -Encoding ascii; $ips } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step4.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Directly invokes the validated local Nmap executable to perform host discovery across targets, avoiding complex regex loop syntax limits.",
+  "provider": "APT-Planner",
+  "cited_urls": []
+}

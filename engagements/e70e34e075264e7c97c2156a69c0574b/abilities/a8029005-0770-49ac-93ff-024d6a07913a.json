@@ -1,0 +1,34 @@
+{
+  "ability_id": "a8029005-0770-49ac-93ff-024d6a07913a",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T06:36:50.389359+00:00",
+  "ability": {
+    "name": "Local Subnet Identification",
+    "description": "Locate and register the primary CIDR and network interfaces attached to the current target node dynamically.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1016",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "network"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "locate_network",
+      "stage_order": 2,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 } | Select-Object -First 1; if ($ip) { $b = ([System.Net.IPAddress]$ip.IPAddress).GetAddressBytes(); $mk = [System.BitConverter]::GetBytes([uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$ip.PrefixLength))); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($mk) }; $net = (0..3|ForEach-Object{$b[$_]-band $mk[$_]}) -join '.'; $cidr = \"$net/$($ip.PrefixLength)\"; Write-Output \"NETWORK_CIDR: $cidr\"; $cidr | Out-File C:\\Windows\\Temp\\bas\\network_cidr.txt -Encoding ascii } else { throw \"No active IPv4 adapters found\" } } catch { Write-Output \"ERROR: step1 $($_.Exception.Message)\" }) | Tee-Object -FilePath $d\\network_cidr_out.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Determining the local subnet configuration dynamically is a mandatory step before any active scanning or host sweeps can be executed securely.",
+  "provider": "Native",
+  "cited_urls": []
+}

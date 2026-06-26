@@ -19,5 +19,6 @@ Internal modules:
 
 from .errors import BasClientError
 from .facade import BasClient
+from .kali import KaliClient, KaliError
 
-__all__ = ["BasClient", "BasClientError"]
+__all__ = ["BasClient", "BasClientError", "KaliClient", "KaliError"]

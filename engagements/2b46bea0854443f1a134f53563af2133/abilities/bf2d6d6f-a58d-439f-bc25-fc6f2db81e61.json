@@ -1,0 +1,34 @@
+{
+  "ability_id": "bf2d6d6f-a58d-439f-bc25-fc6f2db81e61",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T06:26:02.312531+00:00",
+  "ability": {
+    "name": "Step 5 \u2014 Port and Service Discovery",
+    "description": "Probe discovered hosts for key Active Directory indicator ports (e.g. 88, 389, 445, 636, 3268) and standard management ports.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "port-scan"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "port_scan",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $hostsFile = \"$d/live_hosts.txt\"; if (-not (Test-Path $hostsFile)) { throw \"live_hosts.txt not found. Run Step 4 first.\" }; $hosts = Get-Content $hostsFile | Where-Object { $_ -match '^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$' }; if ($hosts.Count -eq 0) { throw \"No valid IPs in live_hosts.txt\" }; $nmapCheck = Get-Content \"$d/nmap_check.txt\" -ErrorAction SilentlyContinue | Out-String; $nmapAvailable = $nmapCheck -match \"NMAP_AVAILABLE: true\"; if ($nmapAvailable) { Write-Output \"Using NMAP path for port scanning\"; $nmapOut = \"$d/nmap_services\"; nmap -sT -sV -Pn -p 21,22,25,53,80,88,110,135,139,143,389,443,445,587,636,1433,1521,3268,3269,3306,3389,5432,5985,5986,8080,8443,8888 --version-intensity 5 --min-rate 200 --max-retries 2 -oA $nmapOut -iL $hostsFile 2>$null; Write-Output \"SCAN_COMPLETE: true\"; if (Test-Path \"$nmapOut.nmap\") { Get-Content \"$nmapOut.nmap\" | Select-String \"open\" | ForEach-Object { Write-Output \"PORT_LINE: $_\" } } } else { Write-Output \"Using PowerShell path for port scanning\"; $ports = @(21,22,25,53,80,88,110,135,139,143,389,443,445,587,636,1433,3268,3269,3306,3389,5432,5985,5986,8080,8443,8888); $svcMap = @{ 21='ftp'; 22='ssh'; 25='smtp'; 53='dns'; 80='http'; 88='kerberos'; 110='pop3'; 135='msrpc'; 139='netbios-ssn'; 143='imap'; 389='ldap'; 443='https'; 445='microsoft-ds'; 587='submission'; 636='ldapssl'; 1433='ms-sql-s'; 3268='globalcatLDAP'; 3269='globalcatLDAPssl'; 3306='mysql'; 3389='ms-wbt-server'; 5432='postgresql'; 5985='wsman'; 5986='wsmans'; 8080='http-proxy'; 8443='https-alt'; 8888='http-alt' }; $svcDict = @{}; foreach ($ip in $hosts) { $svcDict[$ip] = [System.Collections.Generic.List[hashtable]]::new(); foreach ($port in $ports) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $c = $tcp.BeginConnect($ip, $port, $null, $null); if ($c.AsyncWaitHandle.WaitOne(150, $false)) { $tcp.EndConnect($c); $svc = if ($svcMap.ContainsKey($port)) { $svcMap[$port] } else { 'unknown' }; Write-Output \"OPEN: $ip`:$port ($svc)\"; $svcDict[$ip].Add(@{port=$port; proto='tcp'; service=$svc}) } } catch {} finally { $tcp.Dispose() } } }; $svcDict | ConvertTo-Json -Depth 4 | Out-File \"$d/services.json\" -Encoding ascii; Write-Output \"SCAN_COMPLETE: true\"; Write-Output \"HOSTS_SCANNED: $($hosts.Count)\" } } catch { Write-Output \"ERROR: step5_port_scan $($_.Exception.Message)\" }) | Tee-Object -FilePath $d/step5_out.txt",
+      "timeout_seconds": 180,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Profile open ports on live hosts to identify domain controllers, database servers, and management endpoints.",
+  "provider": "builtin",
+  "cited_urls": []
+}

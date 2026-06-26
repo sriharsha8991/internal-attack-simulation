@@ -57,249 +57,37 @@ from ..agents.specialist import (
 )
 from ..client import BasClient
 from ..persistence import ArtifactStore
-from ..phases import resolve_phases_to_skills
+from ..phases import resolve_phases_to_skills, first_skill_for_phase, skills_for_phase
 from ..results import (
     OperationResult,
     build_structural_summary,
     detect_issues,
     parse_operation_result,
+    derive_phase_done,
 )
 from ..tools.skill_tool import SkillTool
-from .state import DONE_SENTINEL, PhaseRecord, SessionState, StageResult
+from .memory import (
+    CampaignMemory,
+    _deep_merge,
+    _merge_lists,
+    project_for_prompt,
+    persist_memory,
+    load_memory_from_disk,
+)
+from .state import (
+    DONE_SENTINEL, 
+    PhaseRecord, 
+    SessionState, 
+    StageResult,
+    phase_history_compact,
+    skill_data_from_push,
+    consolidate_phase_record,
+    log_proposal,
+    build_phase_asset_map,
+)
+from .utils import _now, _log_step
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _first_skill_for_phase(phase: str, skill_tool: SkillTool) -> str | None:
-    """Return the canonical playbook (first skill) registered for a phase."""
-    if not phase:
-        return None
-    resolved, _ = resolve_phases_to_skills([phase], skill_tool)
-    return resolved[0] if resolved else None
-
-
-def _skills_for_phase(phase: str, skill_tool: SkillTool) -> list[str]:
-    """Return ALL playbook skill names registered for a phase, in order."""
-    if not phase:
-        return []
-    resolved, _ = resolve_phases_to_skills([phase], skill_tool)
-    return resolved
-
-
-def _log_step(tag: str, msg: str, *, level: str = "info") -> None:
-    """Emit a visually distinct graph-step line.
-
-    Format: ``[GRAPH][TAG          ]  message``
-    The fixed-width tag makes it easy to grep / column-align in log viewers.
-    """
-    getattr(logger, level)("[GRAPH][%-16s]  %s", tag, msg)
-
-
-def _phase_history_compact(
-    phase_history: list[dict[str, Any]],
-    *,
-    max_entries: int = 5,
-    max_commands_per_phase: int = 3,
-    max_cmd_len: int = 120,
-) -> list[dict[str, Any]]:
-    """Return a trimmed view of phase_history for prompt injection.
-
-    Keeps only the most recent ``max_entries`` phases and truncates the
-    potentially long ``key_commands`` list so context usage stays bounded.
-    """
-    recent = (phase_history or [])[-max_entries:]
-    result = []
-    for rec in recent:
-        result.append({
-            "phase": rec.get("phase"),
-            "objective": rec.get("objective"),
-            "outcome": rec.get("outcome"),
-            "skills_used": rec.get("skills_used"),
-            "techniques_used": rec.get("techniques_used"),
-            "ability_names": (rec.get("ability_names") or [])[:5],
-            "key_commands": [
-                cmd[:max_cmd_len]
-                for cmd in (rec.get("key_commands") or [])[:max_commands_per_phase]
-            ],
-            "memory_delta_keys": rec.get("memory_delta_keys"),
-        })
-    return result
-
-
-def _extract_prior_issues(state: "SessionState") -> list:
-    """Pull StageIssue objects from the last execution for the current phase.
-
-    Reconstructs issues from the stored result JSON via the parser. Falls back
-    to an empty list if no results are available yet.
-    """
-    phase = state.get("current_phase") or ""
-    asset_map = (state.get("phase_asset_map") or {}).get(phase, {})
-    stage_id_map = asset_map.get("stage_id_map", {})
-
-    # Get the last execution_outcome from phase_history
-    history = state.get("phase_history") or []
-    op_id: str | None = None
-    for entry in reversed(history):
-        outcome = entry.get("execution_outcome") or {}
-        if outcome.get("operation_id"):
-            op_id = outcome["operation_id"]
-            break
-
-    if not op_id:
-        return []
-
-    results_dir = state.get("results_dir")
-    if not results_dir:
-        return []
-
-    from ..tools.master_tools import _load_and_parse
-
-    _, op_result = _load_and_parse(results_dir, op_id)
-    if op_result is None:
-        return []
-
-    return detect_issues(op_result, stage_id_map)
-
-
-def _skill_data_from_push(
-    skill_name: str,
-    push: "PushResult",
-    mem_update: "MemoryUpdate",
-) -> dict[str, Any]:
-    """Build a per-skill summary dict for accumulation in phase_skills_buffer."""
-    ability_names = [ab.get("name", "") for ab in push.plan_summary]
-    techniques = list(
-        {ab.get("mitre_technique_id", "") for ab in push.plan_summary} - {"", None}
-    )
-    key_commands: list[str] = []
-    for ab in push.plan_summary:
-        for stg in ab.get("stages") or []:
-            cmd = stg.get("command_template") or ""
-            if cmd:
-                key_commands.append(cmd[:200])
-    return {
-        "skill": skill_name,
-        "abilities_pushed": len(push.ability_ids),
-        "adversary_id": push.adversary_id,
-        "ability_ids": push.ability_ids,
-        "ability_names": ability_names,
-        "techniques_used": techniques,
-        "key_commands": key_commands[:15],
-        "outcome": "committed" if push.success else "failed",
-        "memory_delta_keys": list((mem_update.facts or {}).keys()),
-        "stage_id_map": push.stage_id_map,
-    }
-
-
-def _consolidate_phase_record(
-    phase: str,
-    briefing_obj: "PhaseBriefing",
-    all_skill_data: list[dict[str, Any]],
-    state: "SessionState",
-) -> "PhaseRecord":
-    """Merge all per-skill push summaries into one PhaseRecord for the phase.
-
-    This produces a single record regardless of how many skills the phase ran,
-    so the master always sees exactly one entry per completed phase in
-    ``phase_history``.
-    """
-    all_names: list[str] = []
-    all_techs: set[str] = set()
-    all_cmds: list[str] = []
-    all_mem_keys: set[str] = set()
-    total_abilities = 0
-    adversary_id: str | None = None
-
-    for sd in all_skill_data:
-        all_names.extend(sd.get("ability_names") or [])
-        all_techs.update(sd.get("techniques_used") or [])
-        all_cmds.extend(sd.get("key_commands") or [])
-        all_mem_keys.update(sd.get("memory_delta_keys") or [])
-        total_abilities += sd.get("abilities_pushed") or 0
-        if not adversary_id and sd.get("adversary_id"):
-            adversary_id = sd["adversary_id"]
-
-    any_committed = any(sd.get("outcome") == "committed" for sd in all_skill_data)
-    return PhaseRecord(
-        phase=phase,
-        objective=briefing_obj.objective,
-        skills_used=[sd["skill"] for sd in all_skill_data],
-        abilities_pushed=total_abilities,
-        adversary_id=adversary_id,
-        ability_names=all_names,
-        techniques_used=list(all_techs),
-        key_commands=all_cmds[:15],
-        outcome="committed" if any_committed else "failed",
-        master_revisions=int(state.get("master_revisions_used", 0)),
-        planner_attempts=int(state.get("planner_attempts", 0)),
-        memory_delta_keys=list(all_mem_keys),
-    )
-
-
-def _log_proposal(
-    state: SessionState,
-    *,
-    audience: str,
-    phase: str,
-    attempt: int,
-    plan_summary: list[dict[str, Any]],
-    note: str = "",
-) -> list[dict[str, Any]]:
-    """Append one proposal record to state['proposal_log']. Captures full
-    command_template strings so the audit log is the source of truth on every
-    revision the planner emitted."""
-    proposals = list(state.get("proposal_log") or [])
-    entry: dict[str, Any] = {
-        "ts": _now(),
-        "phase": phase,
-        "audience": audience,  # 'evaluator' or 'master'
-        "attempt": attempt,
-        "note": note,
-        "abilities": [
-            {
-                "name": ab.get("name"),
-                "mitre_technique_id": ab.get("mitre_technique_id"),
-                "platform": ab.get("platform"),
-                "rationale": (ab.get("rationale") or "")[:400],
-                "stages": [
-                    {
-                        "order": s.get("order"),
-                        "executor": s.get("executor"),
-                        "command_template": s.get("command_template"),
-                    }
-                    for s in ab.get("stages") or []
-                ],
-            }
-            for ab in plan_summary
-        ],
-    }
-    proposals.append(entry)
-    # Also mirror a compact line into the human log so tail-N is informative.
-    cmds = sum(len(ab.get("stages") or []) for ab in plan_summary)
-    logger.info(
-        "[proposal] -> %s phase=%s attempt=%d abilities=%d commands=%d note=%r",
-        audience,
-        phase,
-        attempt,
-        len(plan_summary),
-        cmds,
-        note,
-    )
-    return proposals
-
-
-# ---------------------------------------------------------------------------
-# nodes
-# ---------------------------------------------------------------------------
 
 
 def _init_node(state: SessionState) -> dict[str, Any]:
@@ -308,10 +96,37 @@ def _init_node(state: SessionState) -> dict[str, Any]:
     phases = list(state.get("available_phases") or [])
     foothold_keys = list((state.get("foothold") or {}).keys())
     _log_step("INIT", f"run_id={run_id} phases={phases} foothold_keys={foothold_keys}")
+
+    # Prefer state memory; fall back to disk snapshot if empty (crash recovery).
+    memory = state.get("memory", {}) or {}
+    completed_phases = list(state.get("completed_phases") or [])
+    phase_history = list(state.get("phase_history") or [])
+    current_phase = state.get("current_phase", "") or ""
+
+    if not memory:
+        snapshot = load_memory_from_disk(state.get("results_dir"))
+        if snapshot:
+            memory = snapshot.get("memory", {})
+            progress = snapshot.get("campaign_progress", {})
+            # Restore phase tracking if state doesn't have it
+            if not completed_phases:
+                completed_phases = list(progress.get("completed_phases") or [])
+            if not phase_history:
+                phase_history = list(progress.get("phase_history") or [])
+            if not current_phase:
+                current_phase = progress.get("current_phase", "")
+            _log_step(
+                "INIT",
+                f"recovered from disk — completed={completed_phases} "
+                f"current={current_phase!r} memory_keys={len(memory)}",
+            )
+
     return {
         "run_id": run_id,
         "foothold": state.get("foothold", {}) or {},
-        "memory": state.get("memory", {}) or {},
+        "kali_sidecar": state.get("kali_sidecar", {}) or {},
+        "safety": state.get("safety", {}) or {},
+        "memory": memory,
         "completed_stages": state.get("completed_stages", []) or [],
         "stage_results": state.get("stage_results", []) or [],
         # Always reset iteration and master_done so re-running on the same
@@ -322,8 +137,8 @@ def _init_node(state: SessionState) -> dict[str, Any]:
         "log": state.get("log", []) or [],
         # master
         "available_phases": list(state.get("available_phases") or []),
-        "completed_phases": list(state.get("completed_phases") or []),
-        "current_phase": state.get("current_phase", "") or "",
+        "completed_phases": completed_phases,
+        "current_phase": current_phase,
         "master_briefing": state.get("master_briefing"),
         "master_revisions_used": int(state.get("master_revisions_used", 0) or 0),
         "max_master_revisions": int(state.get("max_master_revisions", 1) or 1),
@@ -336,7 +151,7 @@ def _init_node(state: SessionState) -> dict[str, Any]:
         "max_planner_tool_calls": int(state.get("max_planner_tool_calls", 20) or 20),
         # proposals + plan state
         "proposal_log": list(state.get("proposal_log") or []),
-        "phase_history": list(state.get("phase_history") or []),
+        "phase_history": phase_history,
         "phase_skills": list(state.get("phase_skills") or []),
         "phase_skill_index": int(state.get("phase_skill_index", 0) or 0),
         "phase_skills_buffer": [],
@@ -344,10 +159,18 @@ def _init_node(state: SessionState) -> dict[str, Any]:
         "current_plan_summary": [],
         "current_plan_error": None,
         "current_provider_id": None,
+        "route_hint": None,
+        "blocked_reason": None,
+        "required_ack": None,
+        "risk_level": "moderate",
         "last_evaluator_verdict": {},
         "phase_done": False,
         "feedback": "",
         "evaluator_action": "",
+        "retry_same_phase": False,
+        "issues_to_fix": [],
+        "retry_feedback": [],
+        "execution_summary": None,
     }
 
 
@@ -399,7 +222,7 @@ def _master_review(
     )
     eval_verdict = state.get("last_evaluator_verdict") or {}
 
-    proposals = _log_proposal(
+    proposals = log_proposal(
         state,
         audience="master",
         phase=phase,
@@ -412,7 +235,7 @@ def _master_review(
         decision: MasterDecision = master.review_plan(
             briefing=briefing,
             plan_summary=plan_summary,
-            memory=state.get("memory", {}) or {},
+            memory=project_for_prompt(state.get("memory", {}) or {}),
             evaluator_verdict=eval_verdict,
             revise_budget=revise_budget,
         )
@@ -479,7 +302,7 @@ def _master_pick_phase(
     try:
         briefing: PhaseBriefing = master.plan_phase(
             foothold=state.get("foothold", {}) or {},
-            memory=state.get("memory", {}) or {},
+            memory=project_for_prompt(state.get("memory", {}) or {}),
             available_phases=available,
             completed_phases=completed,
             phase_history=list(state.get("phase_history") or []),
@@ -494,10 +317,35 @@ def _master_pick_phase(
         return {"master_done": True, "iteration": attempt, "log": log}
 
     if briefing.done or not briefing.phase:
-        msg = "[master_plan/pick] master signalled done; halting"
-        log.append(msg)
-        _log_step("MASTER/PICK", "→ DONE (master signalled done)")
-        return {"master_done": True, "iteration": attempt, "log": log}
+        # Defensive guard: if the LLM says done but there are still
+        # uncompleted phases, override and pick the first remaining one.
+        remaining = [p for p in available if p not in completed]
+        if remaining:
+            override_phase = remaining[0]
+            msg = (
+                f"[master_plan/pick] master signalled done but {len(remaining)} "
+                f"phases remain ({remaining}); overriding → {override_phase!r}"
+            )
+            log.append(msg)
+            _log_step(
+                "MASTER/PICK",
+                f"→ OVERRIDE done signal — {len(remaining)} phases remain, "
+                f"forcing {override_phase!r}",
+                level="warning",
+            )
+            briefing = PhaseBriefing(
+                phase=override_phase,
+                objective=f"Continue campaign: execute {override_phase} phase.",
+                constraints=briefing.constraints,
+                open_questions=briefing.open_questions,
+                rationale=f"Overridden — master signalled done prematurely with {remaining} phases remaining.",
+                done=False,
+            )
+        else:
+            msg = "[master_plan/pick] master signalled done; halting"
+            log.append(msg)
+            _log_step("MASTER/PICK", "→ DONE (master signalled done)")
+            return {"master_done": True, "iteration": attempt, "log": log}
 
     if available and briefing.phase not in available:
         msg = (
@@ -545,7 +393,7 @@ def _master_pick_phase(
                 "log": log,
             }
 
-    next_skill = _first_skill_for_phase(briefing.phase, skill_tool)
+    next_skill = first_skill_for_phase(briefing.phase, skill_tool)
     if next_skill is None:
         # No skill registered — route directly to push (which skips gracefully)
         # instead of wasting a plan→evaluate→escalate→push-skip loop.
@@ -569,7 +417,7 @@ def _master_pick_phase(
             "log": log,
         }
 
-    all_skills = _skills_for_phase(briefing.phase, skill_tool)
+    all_skills = skills_for_phase(briefing.phase, skill_tool)
     msg = (
         f"[master_plan/pick] phase={briefing.phase} skills={all_skills} "
         f"objective={briefing.objective!r}"
@@ -672,9 +520,11 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         # Inject the master's briefing and a COMPACT phase history into memory
         # so the planner sees full campaign context without blowing the context
         # window (full history can have many long key_command strings).
-        memory_with_brief = dict(state.get("memory") or {})
+        # Project memory (drop pending.*, cap narratives) before enriching with
+        # the briefing + compact phase history so the planner prompt stays bounded.
+        memory_with_brief = project_for_prompt(state.get("memory") or {})
         memory_with_brief["_master_briefing"] = briefing
-        memory_with_brief["_phase_history"] = _phase_history_compact(
+        memory_with_brief["_phase_history"] = phase_history_compact(
             list(state.get("phase_history") or [])
         )
 
@@ -684,7 +534,7 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         planned: PlanResult = plan_specialist(
             plan_state, planner=planner, skill_tool=skill_tool, feedback=feedback
         )
-        proposals = _log_proposal(
+        proposals = log_proposal(
             state,
             audience="evaluator",
             phase=phase,
@@ -724,6 +574,10 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         if planned.plan is not None:
             result["current_plan"] = planned.plan.model_dump(mode="json")
             result["current_plan_summary"] = planned.plan_summary
+            result["route_hint"] = planned.plan.route_hint
+            result["blocked_reason"] = planned.plan.blocked_reason
+            result["required_ack"] = planned.plan.required_ack
+            result["risk_level"] = planned.plan.risk_level
         elif state.get("current_plan"):
             # Failure but a prior plan exists; flag this in the human log so
             # the audit trail shows the fallback is intentional.
@@ -790,7 +644,7 @@ def _make_evaluate_node(evaluator: EvaluatorPolicy, skill_tool: SkillTool):
             verdict: EvaluatorVerdict = evaluator.evaluate(
                 skill=skill_tool.read(skill_name),
                 foothold=state.get("foothold", {}) or {},
-                memory=state.get("memory", {}) or {},
+                memory=project_for_prompt(state.get("memory", {}) or {}),
                 completed_stages=list(state.get("completed_stages") or []),
                 plan_summary=plan_summary,
                 push_success=False,
@@ -841,6 +695,10 @@ def _make_evaluate_node(evaluator: EvaluatorPolicy, skill_tool: SkillTool):
             "evaluator_action": action_label,
             "last_evaluator_verdict": verdict.model_dump(),
             "phase_done": bool(verdict.phase_done),
+            "route_hint": verdict.route_hint or state.get("route_hint"),
+            "blocked_reason": verdict.blocked_reason or state.get("blocked_reason"),
+            "required_ack": verdict.required_ack or state.get("required_ack"),
+            "risk_level": verdict.risk_level or state.get("risk_level") or "moderate",
             "log": log,
         }
 
@@ -852,8 +710,35 @@ def _make_push_node(
     skill_tool: SkillTool,
     bas: BasClient,
     artifacts: ArtifactStore | None,
+    planner: Planner | None = None,
 ):
     """Push the committed plan and update master memory."""
+
+    def _missing_required_ack(state: SessionState, skill_name: str) -> str | None:
+        safety = state.get("safety") or {}
+        acked = {str(x).strip().lower() for x in (safety.get("acks") or [])}
+        required: set[str] = set()
+
+        explicit = state.get("required_ack")
+        if explicit:
+            required.add(str(explicit).strip().lower())
+
+        if (state.get("risk_level") or "").lower() == "destructive":
+            required.add("destructive")
+
+        if skill_name and skill_tool.has(skill_name):
+            skill = skill_tool.read(skill_name)
+            budget = skill.frontmatter.budget
+            destructive_default = None
+            if budget is not None:
+                destructive_default = (budget.model_extra or {}).get("destructive_default")
+            if destructive_default == "ask":
+                required.add(skill.frontmatter.stage or skill_name)
+
+        for token in sorted(required):
+            if token and token not in acked:
+                return token
+        return None
 
     def push_node(state: SessionState) -> dict[str, Any]:
         log = list(state.get("log") or [])
@@ -906,68 +791,48 @@ def _make_push_node(
 
         plan = SpecialistPlan.model_validate(raw_plan)
 
-        # ---- retry detection (Phase 7) -------------------------------------
-        # If the master flagged retry_same_phase AND we have prior asset_map
-        # for this phase, send feedback to fix failed stages instead of
-        # creating new abilities/adversaries.
-        completed_phases = list(state.get("completed_phases") or [])
-        prior_asset_map = (state.get("phase_asset_map") or {}).get(phase)
-        is_retry = (
-            prior_asset_map is not None
-            and phase not in completed_phases
-            and bool(state.get("retry_same_phase"))
-        )
-
-        if is_retry:
-            _log_step("PUSH", f"→ RETRY PATH  phase={phase!r}", level="info")
-            op_id = prior_asset_map.get("operation_id", "")
-            prior_issues = _extract_prior_issues(state)
-
-            changes = master.build_feedback_payload(
-                issues=prior_issues,
-                current_plan=plan,
-                asset_map=prior_asset_map,
-                operation_id=op_id,
+        missing_ack = _missing_required_ack(state, skill_name)
+        if state.get("blocked_reason") or missing_ack:
+            completed_phases = list(state.get("completed_phases") or [])
+            if phase and phase not in completed_phases:
+                completed_phases.append(phase)
+            reason = state.get("blocked_reason") or f"missing required ACK token: {missing_ack}"
+            msg = f"[push] phase={phase} blocked by safety gate: {reason}"
+            log.append(msg)
+            _log_step("PUSH", f"→ BLOCKED  phase={phase!r}  reason={reason}", level="warning")
+            history = list(state.get("phase_history") or [])
+            briefing_obj = PhaseBriefing.model_validate(
+                state.get("master_briefing") or {"phase": phase}
             )
-            if changes:
-                bas.feedback.send(
-                    operation_id=op_id,
-                    changes=changes,
-                    engagement_id=state.get("run_id"),
-                )
-                log.append(
-                    f"[push] RETRY phase={phase} sent {len(changes)} "
-                    f"feedback corrections for op={op_id}"
-                )
-            else:
-                log.append(
-                    f"[push] RETRY phase={phase} no corrections to send — "
-                    f"re-running same operation op={op_id}"
-                )
-
-            _log_step(
-                "PUSH",
-                f"→ RETRY feedback={len(changes)} changes  op={op_id}",
-            )
-            # Return minimal update — no new IDs, keep existing asset_map
+            history.append(PhaseRecord(
+                phase=phase,
+                objective=briefing_obj.objective,
+                skills_used=[skill_name] if skill_name else [],
+                outcome="blocked",
+                master_revisions=int(state.get("master_revisions_used", 0)),
+                planner_attempts=int(state.get("planner_attempts", 0)),
+            ).model_dump(mode="json"))
             return {
-                "stage_results": list(state.get("stage_results") or []),
-                "retry_same_phase": False,  # consumed
-                "issues_to_fix": [],
-                # Explicitly reset multi-skill tracking so _after_push
-                # routes to analyse_results (not master_plan)
-                "phase_skills": [],
-                "phase_skill_index": 0,
-                # reset planning state so next cycle starts clean
+                "completed_phases": completed_phases,
+                "phase_history": history,
                 "current_plan": None,
                 "current_plan_summary": [],
                 "current_plan_error": None,
-                "master_revision_feedback": "",
+                "blocked_reason": reason,
+                "required_ack": missing_ack or state.get("required_ack"),
                 "evaluator_action": "",
                 "feedback": "",
                 "log": log,
             }
 
+        # ---- retry handling ------------------------------------------------
+        # A retry (master set retry_same_phase) re-pushes the CORRECTED plan as a
+        # fresh operation rather than patching the prior operation's stages via
+        # /ai/operation-feedback. The old feedback path could not map a reshaped
+        # retry plan back onto the original stage_ids (it silently sent zero
+        # corrections); re-pushing a clean operation always applies the fix. The
+        # `retry_same_phase` / `issues_to_fix` flags are consumed in the
+        # phase-complete return below.
         push: PushResult = push_specialist(
             state,
             plan=plan,
@@ -975,6 +840,7 @@ def _make_push_node(
             bas=bas,
             artifacts=artifacts,
             provider_id=state.get("current_provider_id"),
+            catalog=getattr(planner, "_catalog", None),
         )
 
         results = list(state.get("stage_results") or [])
@@ -1000,36 +866,13 @@ def _make_push_node(
         )
 
         completed_stages = list(state.get("completed_stages") or [])
-        if skill_name and skill_name not in completed_stages:
-            completed_stages.append(skill_name)
-
-        # Master writes the memory delta.
-        try:
-            briefing = PhaseBriefing.model_validate(
-                state.get("master_briefing") or {"phase": phase}
-            )
-            mem_update: MemoryUpdate = master.update_memory(
-                memory=state.get("memory", {}) or {},
-                briefing=briefing,
-                plan_summary=push.plan_summary,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("[push] memory update failed: %s", exc)
-            mem_update = MemoryUpdate(facts={}, narrative=f"committed {phase}")
-
+        mem_update = MemoryUpdate(facts={}, narrative="")
         new_memory = dict(state.get("memory") or {})
-        # Merge facts (shallow); preserve prior keys unless overwritten.
-        for k, v in (mem_update.facts or {}).items():
-            new_memory[k] = v
-        narratives = list(new_memory.get("narratives") or [])
-        if mem_update.narrative:
-            narratives.append({"phase": phase, "ts": _now(), "text": mem_update.narrative})
-            new_memory["narratives"] = narratives
 
         msg = (
             f"[push] phase={phase} skill={skill_name} success={push.success} "
             f"adversary={push.adversary_id} abilities={len(push.ability_ids)} "
-            f"narrative={(mem_update.narrative or '')[:120]!r}"
+            "memory=pending-only"
             + (f" error={push.error!r}" if push.error else "")
         )
         log.append(msg)
@@ -1037,13 +880,13 @@ def _make_push_node(
             "PUSH",
             f"→ success={push.success}  adversary={push.adversary_id}  "
             f"abilities={len(push.ability_ids)}  "
-            f"memory_keys={list((mem_update.facts or {}).keys())}"
+            "memory=pending-only"
             + (f"  error={push.error!r}" if push.error else ""),
             level="info" if push.success else "error",
         )
 
         # ---- accumulate per-skill data in buffer ----------------------------
-        skill_data = _skill_data_from_push(skill_name, push, mem_update)
+        skill_data = skill_data_from_push(skill_name, push, mem_update)
         skills_buffer = list(state.get("phase_skills_buffer") or [])
         skills_buffer.append(skill_data)
 
@@ -1087,7 +930,7 @@ def _make_push_node(
         briefing_obj = PhaseBriefing.model_validate(
             state.get("master_briefing") or {"phase": phase}
         )
-        phase_rec = _consolidate_phase_record(phase, briefing_obj, skills_buffer, state)
+        phase_rec = consolidate_phase_record(phase, briefing_obj, skills_buffer, state)
         history = list(state.get("phase_history") or [])
         history.append(phase_rec.model_dump(mode="json"))
 
@@ -1119,9 +962,17 @@ def _make_push_node(
         }
 
         # ---- Phase 5: write pending.* memory keys --------------------------
+        pending_mem = CampaignMemory(new_memory)
         for sd in skills_buffer:
             for ab_name in sd.get("ability_names", []):
-                new_memory[f"pending.{phase}.{ab_name}"] = "awaiting_results"
+                pending_mem.add_pending(phase=phase, ability=ab_name)
+        new_memory = pending_mem.data
+
+        persist_state = dict(state)
+        persist_state["memory"] = new_memory
+        persist_state["phase_history"] = history
+        persist_state["phase_asset_map"] = phase_asset_map
+        persist_memory(persist_state, new_memory, label=f"push/{phase}/pending")
 
         # Do NOT add phase to completed_phases here — analyse_results owns
         # that decision after inspecting actual execution results.
@@ -1141,6 +992,10 @@ def _make_push_node(
             "phase_history": history,
             "phase_asset_map": phase_asset_map,
             "pending_operation_id": None,  # populated by analyse_results from backend result
+            # retry flags consumed: the corrected plan was just pushed as a new op
+            "retry_same_phase": False,
+            "issues_to_fix": [],
+            "retry_feedback": [],
             # reset all multi-skill tracking so next phase starts clean
             "phase_skills": [],
             "phase_skill_index": 0,
@@ -1168,18 +1023,95 @@ def _derive_phase_done(
 ) -> bool:
     """Decide whether the phase is complete based on execution results.
 
-    Heuristic: phase is done when at least one ability passed and no critical
-    issues (placeholder tokens, tool-not-found) were detected in passing
-    abilities. Timeout alone doesn't block completion.
+    The phase is done when:
+      1. The operation didn't fail at the infrastructure level.
+      2. At least one ability passed.
+        3. No detected issues. An exit code of 0 can still carry stdout/stderr
+            failures from shell wrappers, missing types, unsupported parameters,
+            or access denials.
+        4. Every ability passed. Backend operation status alone is not enough;
+            a completed operation can still contain failed ability stages.
     """
     from ..results import IssueKind
+
+    total = len(op_result.abilities)
+    if total == 0:
+        return False
+
+    if op_result.operation_status == "failed":
+        return False
 
     passed_count = sum(1 for a in op_result.abilities if a.passed)
     if passed_count == 0:
         return False
-    critical_kinds = {IssueKind.PLACEHOLDER_TOKEN, IssueKind.TOOL_NOT_FOUND}
-    critical_issues = [i for i in issues if i.kind in critical_kinds]
-    return len(critical_issues) == 0
+
+    if passed_count != total:
+        return False
+
+    if issues:
+        return False
+
+    return True
+
+
+def _build_retry_feedback(
+    phase: str,
+    op_result: OperationResult,
+    issues: list,
+) -> list[dict[str, Any]]:
+    """Build structured retry guidance from deterministic issues and failures."""
+    feedback: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    stage_lookup = {
+        (ab.ability_id, st.stage_name): (ab, st)
+        for ab in op_result.abilities
+        for st in ab.stages
+    }
+
+    for iss in issues:
+        ab, st = stage_lookup.get((iss.ability_id, iss.stage_name), (None, None))
+        key = (iss.ability_id, iss.stage_name, iss.kind.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        feedback.append({
+            "kind": iss.kind.value,
+            "phase": phase,
+            "ability": iss.ability_name or (ab.name if ab else iss.ability_id),
+            "stage": iss.stage_name,
+            "exit_code": st.exit_code if st else None,
+            "detail": (
+                f"[{iss.kind.value}] ability={iss.ability_name!r} "
+                f"stage={iss.stage_name!r}: {iss.detail}"
+            ),
+            "command": st.command_executed if st else "",
+            "stdout_preview": (st.stdout if st else "")[:500],
+            "stderr_preview": (st.stderr if st else "")[:500],
+        })
+
+    issue_stage_keys = {(item["ability"], item["stage"]) for item in feedback}
+    for ab in op_result.abilities:
+        for st in ab.stages:
+            if st.exit_code == 0:
+                continue
+            if (ab.name, st.stage_name) in issue_stage_keys:
+                continue
+            feedback.append({
+                "kind": "nonzero_exit",
+                "phase": phase,
+                "ability": ab.name or ab.ability_id,
+                "stage": st.stage_name,
+                "exit_code": st.exit_code,
+                "detail": (
+                    f"[nonzero_exit] ability={ab.name!r} stage={st.stage_name!r}: "
+                    f"exit_code={st.exit_code}"
+                ),
+                "command": st.command_executed,
+                "stdout_preview": st.stdout[:500],
+                "stderr_preview": st.stderr[:500],
+            })
+
+    return feedback
 
 
 def _make_analyse_results_node(master: MasterPolicy):
@@ -1190,16 +1122,27 @@ def _make_analyse_results_node(master: MasterPolicy):
         _log_step("ANALYSE", "pausing graph — awaiting backend results")
         result_data = interrupt("awaiting_results")
 
+        # Safety: if checkpointer didn't restore memory, reload from disk.
+        if not state.get("memory"):
+            snapshot = load_memory_from_disk(state.get("results_dir"))
+            if snapshot:
+                state = dict(state)  # type: ignore[assignment]
+                state["memory"] = snapshot.get("memory", {})
+                progress = snapshot.get("campaign_progress", {})
+                if not state.get("completed_phases") and progress.get("completed_phases"):
+                    state["completed_phases"] = progress["completed_phases"]
+                if not state.get("phase_history") and progress.get("phase_history"):
+                    state["phase_history"] = progress["phase_history"]
+
         # Handle timeout resume — no results to analyse
         if isinstance(result_data, dict) and result_data.get("timeout"):
             log = list(state.get("log") or [])
             phase = state.get("current_phase") or ""
 
             # Clear pending.* keys — they can't be verified without results
-            new_memory = dict(state.get("memory") or {})
-            pending_keys = [k for k in new_memory if k.startswith("pending.")]
-            for pk in pending_keys:
-                del new_memory[pk]
+            _mem = CampaignMemory.from_state(state)
+            cleared_pending = len(_mem.pending_keys())
+            new_memory = _mem.clear_pending().data
 
             # Set execution_summary so master_plan sees timeout context
             timeout_summary = (
@@ -1222,8 +1165,20 @@ def _make_analyse_results_node(master: MasterPolicy):
                 }
                 history[-1] = last
 
+            retry_feedback = [{
+                "kind": "timeout",
+                "phase": phase,
+                "ability": None,
+                "stage": None,
+                "exit_code": None,
+                "detail": timeout_summary,
+                "command": None,
+                "stdout_preview": "",
+                "stderr_preview": "",
+            }]
+
             log.append(
-                f"[analyse_results] TIMEOUT — cleared {len(pending_keys)} "
+                f"[analyse_results] TIMEOUT — cleared {cleared_pending} "
                 f"pending keys, signalling retry for phase={phase}"
             )
             _log_step(
@@ -1233,18 +1188,19 @@ def _make_analyse_results_node(master: MasterPolicy):
                 level="warning",
             )
 
+            persist_state = dict(state)
+            persist_state["memory"] = new_memory
+            persist_state["phase_history"] = history
+            persist_memory(persist_state, new_memory, label=f"analyse/timeout/{phase}")
+
             return {
                 "memory": new_memory,
                 "phase_history": history,
                 "execution_summary": timeout_summary,
                 "pending_operation_id": None,
                 "retry_same_phase": True,
-                "issues_to_fix": [
-                    "Previous attempt timed out — no results received. "
-                    "Consider: (1) commands may have been blocked by AV/EDR, "
-                    "(2) agent may be offline, (3) commands may need evasion "
-                    "techniques (LOLBins, encoded commands, AMSI bypass)."
-                ],
+                "issues_to_fix": [item["detail"] for item in retry_feedback],
+                "retry_feedback": retry_feedback,
                 "log": log,
             }
 
@@ -1270,7 +1226,7 @@ def _make_analyse_results_node(master: MasterPolicy):
                 results_dir=state.get("results_dir"),
                 operation_id=op_result.operation_id,
                 structural_summary=summary,
-                current_memory=state.get("memory", {}),
+                current_memory=project_for_prompt(state.get("memory", {}) or {}),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[analyse_results] LLM analysis failed: %s", exc)
@@ -1278,21 +1234,15 @@ def _make_analyse_results_node(master: MasterPolicy):
                 facts={}, narrative=f"analysis failed: {exc!r}"
             )
 
-        # 3. Promote pending.* → confirmed facts
-        new_memory = dict(state.get("memory") or {})
-        # Remove all pending.* keys — they were speculative
-        pending_keys = [k for k in new_memory if k.startswith("pending.")]
-        for pk in pending_keys:
-            del new_memory[pk]
-        # Merge confirmed facts from LLM
-        for k, v in (mem_update.facts or {}).items():
-            new_memory[k] = v
-        if mem_update.narrative:
-            narratives = list(new_memory.get("narratives") or [])
-            narratives.append({
-                "phase": phase, "ts": _now(), "text": mem_update.narrative
-            })
-            new_memory["narratives"] = narratives
+        # 3. Drop speculative pending.* keys, then deep-merge confirmed facts and
+        # append the narrative.
+        new_memory = (
+            CampaignMemory.from_state(state)
+            .clear_pending()
+            .merge_facts(mem_update.facts)
+            .add_narrative(phase=phase, text=mem_update.narrative, ts=_now())
+            .data
+        )
 
         # 4. Phase done decision
         phase_done = _derive_phase_done(op_result, issues)
@@ -1308,17 +1258,34 @@ def _make_analyse_results_node(master: MasterPolicy):
         history = list(state.get("phase_history") or [])
         if history:
             last = dict(history[-1])
+            retry_feedback = _build_retry_feedback(phase, op_result, issues)
             last["execution_outcome"] = {
                 "operation_id": op_result.operation_id,
                 "abilities_passed": sum(1 for a in op_result.abilities if a.passed),
                 "abilities_failed": sum(1 for a in op_result.abilities if a.failed),
                 "issues_detected": [i.kind.value for i in issues],
+                "retry_feedback": retry_feedback,
             }
             history[-1] = last
+        else:
+            retry_feedback = _build_retry_feedback(phase, op_result, issues)
 
         completed_phases = list(state.get("completed_phases") or [])
         if phase_done and phase and phase not in completed_phases:
             completed_phases.append(phase)
+
+        persisted_completed_phases = completed_phases if phase_done else list(state.get("completed_phases") or [])
+
+        persist_state = dict(state)
+        persist_state["memory"] = new_memory
+        persist_state["phase_history"] = history
+        persist_state["completed_phases"] = persisted_completed_phases
+        persist_state["phase_asset_map"] = updated_asset_map
+        persist_memory(
+            persist_state,
+            new_memory,
+            label=f"analyse/{phase}/{op_result.operation_id[:8]}",
+        )
 
         log = list(state.get("log") or [])
         log.append(
@@ -1335,15 +1302,28 @@ def _make_analyse_results_node(master: MasterPolicy):
             f"issues={[i.kind.value for i in issues]}",
         )
 
-        return {
+        result: dict[str, Any] = {
             "memory": new_memory,
             "phase_history": history,
-            "completed_phases": completed_phases if phase_done else state.get("completed_phases"),
+            "completed_phases": persisted_completed_phases,
             "execution_summary": summary,
             "phase_asset_map": updated_asset_map,
             "pending_operation_id": None,
+            "retry_feedback": [] if phase_done else retry_feedback,
             "log": log,
         }
+
+        # When the phase is NOT done and there are detected issues or failed
+        # abilities, signal retry with specific actionable descriptions so the
+        # master and planner know exactly what to fix.
+        if not phase_done:
+            failed_abilities = [a for a in op_result.abilities if a.failed]
+            if issues or failed_abilities:
+                result["retry_same_phase"] = True
+                result["issues_to_fix"] = [item["detail"] for item in retry_feedback]
+                result["retry_feedback"] = retry_feedback
+
+        return result
 
     return analyse_results_node
 
@@ -1421,7 +1401,7 @@ def build_graph(
     g.add_node("master_plan", _make_master_plan_node(master, skill_tool))
     g.add_node("plan", _make_plan_node(planner, skill_tool))
     g.add_node("evaluate", _make_evaluate_node(evaluator, skill_tool))
-    g.add_node("push", _make_push_node(master, skill_tool, bas, artifacts))
+    g.add_node("push", _make_push_node(master, skill_tool, bas, artifacts, planner=planner))
     g.add_node("analyse_results", _make_analyse_results_node(master))
 
     g.add_edge(START, "init")
@@ -1446,20 +1426,30 @@ def build_graph(
     return g.compile(checkpointer=checkpointer)
 
 
-def _stream_graph(app, seed: dict[str, Any], run_config: dict[str, Any]) -> dict[str, Any]:
+def _stream_graph(app, seed: Any, run_config: dict[str, Any]) -> dict[str, Any]:
     """Stream graph updates, log each step, raise GraphInterrupt if paused.
 
     Shared between ``_run_engagement_inner`` (initial run) and ``_resume_graph``
     (webhook resume) so both use the same logging/interrupt logic.
-    """
-    logger.info(
-        "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
-        seed.get("available_phases"),
-        list((seed.get("foothold") or {}).keys()),
-        run_config.get("configurable", {}).get("thread_id"),
-    )
 
-    state: dict[str, Any] = dict(seed)
+    ``seed`` may be a plain dict (initial run) or a ``Command(resume=...)``
+    object (webhook resume).
+    """
+    is_resume = not isinstance(seed, dict)
+    if is_resume:
+        logger.info(
+            "[GRAPH][RESUME         ]  thread_id=%s",
+            run_config.get("configurable", {}).get("thread_id"),
+        )
+    else:
+        logger.info(
+            "[GRAPH][START          ]  phases=%s  foothold_keys=%s  thread_id=%s",
+            seed.get("available_phases"),
+            list((seed.get("foothold") or {}).keys()),
+            run_config.get("configurable", {}).get("thread_id"),
+        )
+
+    state: dict[str, Any] = seed if isinstance(seed, dict) else {}
     step_count = 0
     _interrupted = False
     for chunk in app.stream(seed, config=run_config, stream_mode="updates"):

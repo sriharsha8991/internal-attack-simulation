@@ -1,0 +1,46 @@
+{
+  "run_id": "37f14cc91cec41b3a0c3afeb9edddfa6",
+  "status": "failed",
+  "started_at": "2026-06-23T09:41:54.458089+00:00",
+  "finished_at": "2026-06-23T10:12:30.612828+00:00",
+  "request": {
+    "phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "environment": {
+      "id": "82e01037-11db-4b59-a79c-661b3838cfea",
+      "name": "Test Prod"
+    },
+    "target": {
+      "platform": "windows"
+    },
+    "max_iterations": 25,
+    "dry_run": true
+  },
+  "state": null,
+  "error": "process restarted before completion",
+  "skill_order": [
+    "discovery",
+    "privesc",
+    "credaccess",
+    "lateral",
+    "persistence",
+    "defevasion",
+    "impact"
+  ],
+  "foothold": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "environment_name": "Test Prod",
+    "agent_id": "277f297f",
+    "hostname": "CASTELBLACK",
+    "platform": "windows",
+    "ip_address": "192.168.187.141",
+    "display_status": "offline"
+  }
+}

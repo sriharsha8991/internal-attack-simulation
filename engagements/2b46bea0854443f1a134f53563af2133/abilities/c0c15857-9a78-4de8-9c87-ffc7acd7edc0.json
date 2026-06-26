@@ -1,0 +1,33 @@
+{
+  "ability_id": "c0c15857-9a78-4de8-9c87-ffc7acd7edc0",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:26.755020+00:00",
+  "ability": {
+    "name": "AD CS Template and Vulnerability Audit",
+    "description": "Executes Certify.exe to detect misconfigured Certificate Templates (such as ESC1-ESC8) within the Active Directory domain.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1615",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "adcs-vulnerability"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Execute Certify for Vulnerable Templates",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { Certify.exe find /vulnerable } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\adcs.txt",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Satisfies the master requirement to audit AD CS certificates and potential template exposures.",
+  "provider": "system",
+  "cited_urls": []
+}

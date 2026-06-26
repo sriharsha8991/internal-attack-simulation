@@ -1,0 +1,34 @@
+{
+  "ability_id": "e4b02174-a22d-417d-8311-5c010dca03a9",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T10:21:01.101343+00:00",
+  "ability": {
+    "name": "Step 4 - Host Discovery / Live-Asset Map",
+    "description": "Enumerate active host IPs inside the network boundaries using nmap or safe PS ICMP fallback.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "1d55cfc5b13c4606b05f392cdd678e98"
+  },
+  "stages": [
+    {
+      "stage_name": "Execution",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $nmapAvail = $false; if (Test-Path \"$d\\step2.txt\") { $nmapAvail = (Get-Content \"$d\\step2.txt\" | Select-String \"NMAP_AVAILABLE: true\") -ne $null }; $cidrs = Get-Content \"$d\\network_cidrs.txt\" -ErrorAction SilentlyContinue; if (-not $cidrs) { $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 }; $cidrs = @(); foreach ($adapter in $adapters) { $ipBytes = ([System.Net.IPAddress]$adapter.IPAddress).GetAddressBytes(); $maskBytes = [System.BitConverter]::GetBytes([uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$adapter.PrefixLength))); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($maskBytes) }; $netBytes = 0..3 | ForEach-Object { $ipBytes[$_] -band $maskBytes[$_] }; $net = $netBytes -join '.'; $cidrs += \"$net/$($adapter.PrefixLength)\" } }; $hosts = [System.Collections.Generic.HashSet[string]]::new(); if ($nmapAvail) { Write-Output \"STATUS: Running Nmap sweep\"; $idx = 1; foreach ($cidr in $cidrs) { nmap -sn -PE -PP -PS21,22,80,135,139,443,445,3389,5985 -PA80,443 --min-rate 300 --max-retries 1 -oG \"$d\\sweep_$idx.gnmap\" $cidr 2>$null; if (Test-Path \"$d\\sweep_$idx.gnmap\") { Get-Content \"$d\\sweep_$idx.gnmap\" | ForEach-Object { if ($_ -match \"Host: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}) .*Status: Up\") { $null = $hosts.Add($Matches[1]) } } }; $idx++ } } else { Write-Output \"STATUS: Running PS-fallback sweep\"; foreach ($cidr in $cidrs) { $prefix = ($cidr -split '/')[0] -replace '\\d+$',''; try { arp -a 2>$null | Select-String \"$($prefix.TrimEnd('.')).\\d+\" | ForEach-Object { if ($_ -match '(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})') { $null = $hosts.Add($Matches[1]) } } } catch {}; try { 1..254 | ForEach-Object { $ip = \"$($prefix.TrimEnd('.'))_$_\" -replace '_','.'; if ($hosts -notcontains $ip) { if (Test-Connection -ComputerName $ip -Count 1 -Quiet -TimeoutMilliSecs 500 -ErrorAction SilentlyContinue) { $null = $hosts.Add($ip) } } } } catch {}; try { 1..254 | ForEach-Object { $ip = \"$($prefix.TrimEnd('.'))_$_\" -replace '_','.'; if ($hosts -notcontains $ip) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $c = $tcp.BeginConnect($ip, 445, $null, $null); if ($c.AsyncWaitHandle.WaitOne(500, $false)) { $tcp.EndConnect($c); $null = $hosts.Add($ip) } } catch {} finally { $tcp.Dispose() } } } } catch {} } }; $unique = $hosts | Sort-Object; $unique | Out-File \"$d\\live_hosts.txt\" -Encoding ascii; $unique | ConvertTo-Json | Out-File \"$d\\live_hosts.json\" -Encoding ascii; Write-Output \"LIVE_HOST_COUNT: $($unique.Count)\"; $unique | ForEach-Object { Write-Output \"HOST: $_\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\step4.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Leverages Nmap if present, else performs a structured, low-risk PowerShell ARP cache lookup, ICMP ping sweep with 500ms timeout, and TCP/445 fallback.",
+  "provider": "BAS-Internal",
+  "cited_urls": []
+}

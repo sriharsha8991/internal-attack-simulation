@@ -1,0 +1,18 @@
+{
+  "adversary_id": "5f314f1b-9edb-45ea-8e3a-bc027462abef",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-25T07:29:18.030277+00:00",
+  "adversary": {
+    "name": "APT Privilege State Verifier",
+    "description": "Initial read-only privilege check to determine current integrity level and group memberships before choosing an escalation path.",
+    "profile": "APT",
+    "execution_strategy": "Sequential execution of native whoami commands without writing to disk.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "linked_ability_ids": [
+    "a0b42e15-c596-49cb-8590-63842269b618"
+  ]
+}

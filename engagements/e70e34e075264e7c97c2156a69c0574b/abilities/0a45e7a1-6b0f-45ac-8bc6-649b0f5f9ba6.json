@@ -1,0 +1,34 @@
+{
+  "ability_id": "0a45e7a1-6b0f-45ac-8bc6-649b0f5f9ba6",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T06:36:52.561495+00:00",
+  "ability": {
+    "name": "Dynamic Service and Port Profiler",
+    "description": "Performs targeted scans on mapped hosts for DC indicating ports (88, 389, 445, 636, 3268) and typical administrative ports via .NET TCP connection tests.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "services"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "scan_services",
+      "stage_order": 5,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $hostsFile = 'C:\\Windows\\Temp\\bas\\live_hosts.txt'; if (-not (Test-Path $hostsFile)) { $hosts = @(\"192.168.187.141\") } else { $hosts = Get-Content $hostsFile -ErrorAction Stop | Where-Object { $_ -match '^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$' } }; $ports = @(21,22,25,53,80,88,110,135,139,143,389,443,445,587,636,1433,3268,3269,3306,3389,5432,5985,5986,8080,8443,8888); $svcMap = @{ 21='ftp'; 22='ssh'; 25='smtp'; 53='dns'; 80='http'; 88='kerberos'; 110='pop3'; 135='msrpc'; 139='netbios-ssn'; 143='imap'; 389='ldap'; 443='https'; 445='microsoft-ds'; 587='submission'; 636='ldapssl'; 1433='ms-sql-s'; 3268='globalcatLDAP'; 3269='globalcatLDAPssl'; 3306='mysql'; 3389='ms-wbt-server'; 5432='postgresql'; 5985='wsman'; 5986='wsmans'; 8080='http-proxy'; 8443='https-alt'; 8888='http-alt' }; $svcDict = @{}; foreach ($ip in $hosts) { $svcDict[$ip] = [System.Collections.Generic.List[hashtable]]::new(); foreach ($port in $ports) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $c = $tcp.BeginConnect($ip, $port, $null, $null); if ($c.AsyncWaitHandle.WaitOne(150, $false)) { $tcp.EndConnect($c); $svc = if ($svcMap.ContainsKey($port)) { $svcMap[$port] } else { 'unknown' }; Write-Output \"OPEN: $ip`:$port ($svc)\"; $svcDict[$ip].Add(@{port=$port; proto='tcp'; service=$svc}) } } catch {} finally { $tcp.Dispose() } } }; $svcDict | ConvertTo-Json -Depth 4 | Out-File C:\\Windows\\Temp\\bas\\services.json -Encoding ascii; Write-Output \"SCAN_COMPLETE: true\"; Write-Output \"HOSTS_SCANNED: $($hosts.Count)\" } catch { Write-Output \"ERROR: step5_ps $($_.Exception.Message)\" }) | Tee-Object -FilePath $d\\step5.txt",
+      "timeout_seconds": 240,
+      "payload_id": null
+    }
+  ],
+  "rationale": "We run a targeted port verification test against only verified responsive hosts, allowing us to accurately gather network service footprint metrics with minimal noise.",
+  "provider": "Native",
+  "cited_urls": []
+}

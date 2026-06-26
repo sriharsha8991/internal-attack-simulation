@@ -14,7 +14,10 @@ is raised and the orchestrator decides what to do.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
+import time
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -29,7 +32,44 @@ from .base import (
     ResearchResult,
 )
 
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T", bound=BaseModel)
+
+# Substrings that mark a transient, retryable provider failure (rate limits,
+# overload, gateway/availability blips, timeouts). Matched case-insensitively
+# against the exception text since the google-genai SDK surfaces these as
+# generic exceptions carrying an HTTP status / reason string.
+_RETRYABLE_HINTS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "rate limit",
+    "resource_exhausted",
+    "resource exhausted",
+    "unavailable",
+    "overloaded",
+    "deadline",
+    "timeout",
+    "timed out",
+    "connection reset",
+    "connection aborted",
+    "temporarily",
+)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """True if ``exc`` looks like a transient failure worth retrying.
+
+    A grounding-budget breach is deterministic (not transient), so it is never
+    retried even though it subclasses ``LLMProviderError``.
+    """
+    if isinstance(exc, GroundingBudgetExceeded):
+        return False
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(hint in text for hint in _RETRYABLE_HINTS)
 
 # Heuristic prompt for the classifier model for web evidence grounding.
 _DEPTH_CLASSIFIER_PROMPT = (
@@ -100,9 +140,11 @@ class GeminiProvider:
         model: str,
         classifier_model: str,
         api_key: str,
-        temperature: float = 0.2,
+        temperature: float | None = None,
         max_grounded_calls_per_run: int = 40,
-        thinking_level: str = "medium",
+        thinking_level: str = "high",
+        max_retries: int = 3,
+        retry_base_delay: float = 1.0,
     ) -> None:
         # Import lazily so the module imports cleanly even when google-genai
         # is not installed (e.g. in unit tests using stub providers).
@@ -124,6 +166,8 @@ class GeminiProvider:
         self._max_grounded = max_grounded_calls_per_run
         self._grounded_count = 0
         self._thinking_level = thinking_level
+        self._max_retries = max(0, max_retries)
+        self._retry_base_delay = max(0.0, retry_base_delay)
 
     # ---- introspection ------------------------------------------------------
 
@@ -157,9 +201,15 @@ class GeminiProvider:
             self._budget_check()
             tools = [types.Tool(google_search=types.GoogleSearch())]
 
-        kwargs: dict[str, Any] = {
-            "temperature": self._temperature if temperature is None else temperature,
-        }
+        kwargs: dict[str, Any] = {}
+        # As per Gemini 3.x best practices: do not send temperature parameter
+        # to ensure reasoning capabilities remain optimized by defaults.
+        t = temperature if temperature is not None else self._temperature
+        # We DO NOT send `temperature` or `top_p` or `top_k` per Gemini 3 documentation
+        # If it is being passed locally, we explicitly drop it.
+        # if t is not None:
+        #     kwargs["temperature"] = t
+
         if tools:
             kwargs["tools"] = tools
         if response_schema is not None:
@@ -210,17 +260,39 @@ class GeminiProvider:
             response_schema=response_schema,
             thinking=thinking,
         )
-        try:
-            resp = self._client.models.generate_content(
-                model=model,
-                contents=self._to_contents(messages),
-                config=config,
-            )
-        except Exception as e:  # pragma: no cover - SDK-level failures
-            raise LLMProviderError(f"gemini generate_content failed: {e}") from e
-        if grounding != "skip":
-            self._grounded_count += 1
-        return resp
+        contents = self._to_contents(messages)
+        # Bounded retry with exponential backoff + jitter for transient failures
+        # (429 / 5xx / timeouts). Deterministic failures (bad schema, budget)
+        # are not retried — see `_is_retryable`.
+        attempts = self._max_retries + 1
+        last_exc: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                resp = self._client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config,
+                )
+                if grounding != "skip":
+                    self._grounded_count += 1
+                return resp
+            except Exception as e:  # pragma: no cover - SDK-level failures
+                last_exc = e
+                if attempt < self._max_retries and _is_retryable(e):
+                    delay = self._retry_base_delay * (2**attempt) + random.uniform(0, 0.5)
+                    logger.warning(
+                        "[gemini] transient failure (attempt %d/%d), retrying in %.2fs: %s",
+                        attempt + 1,
+                        attempts,
+                        delay,
+                        e,
+                    )
+                    time.sleep(delay)
+                    continue
+                break
+        raise LLMProviderError(
+            f"gemini generate_content failed after {attempts} attempt(s): {last_exc}"
+        ) from last_exc
 
     @staticmethod
     def _extract_citations(resp: Any) -> list[str]:
@@ -281,6 +353,7 @@ class GeminiProvider:
         *,
         grounding: GroundingDepth = "skip",
         temperature: float | None = None,
+        thinking: str | None = None,
     ) -> T:
         if grounding != "skip":
             # Gemini structured output and google_search are mutually exclusive.
@@ -289,25 +362,66 @@ class GeminiProvider:
                 "generate_structured cannot be combined with grounding; "
                 "research first, then call generate_structured(grounding='skip')"
             )
-        resp = self._generate(
-            model=self._model,
-            messages=messages,
-            grounding="skip",
-            temperature=temperature,
-            response_schema=schema,
-            thinking="high",  # structured planning needs deep reasoning
+
+        # `thinking` defaults to the instance level (configurable) rather than a
+        # hardcoded "high" — callers route deep-reasoning work (planning) to
+        # "high" and mechanical work (memory merge, extraction, grading) lower.
+        effective_thinking = thinking or self._thinking_level
+
+        def _attempt(msgs: list[LLMMessage]) -> tuple[T | None, str, Exception | None]:
+            resp = self._generate(
+                model=self._model,
+                messages=msgs,
+                grounding="skip",
+                temperature=temperature,
+                response_schema=schema,
+                thinking=effective_thinking,
+            )
+            raw_text = (resp.text or "").strip()
+            if not raw_text:
+                return None, "", LLMProviderError(
+                    "empty response body from gemini structured call"
+                )
+            try:
+                data = json.loads(raw_text)
+            except json.JSONDecodeError as exc:
+                return None, raw_text, exc
+            try:
+                return schema.model_validate(data), raw_text, None
+            except ValidationError as exc:
+                return None, raw_text, exc
+
+        obj, raw, err = _attempt(messages)
+        if obj is not None:
+            return obj
+
+        # One repair round-trip: feed the malformed output + error back and ask
+        # for valid JSON only. A deterministic near-miss (truncated/extra prose)
+        # usually self-corrects here instead of aborting the whole phase.
+        logger.warning(
+            "[gemini] structured output invalid (%s); attempting one repair re-ask",
+            type(err).__name__ if err else "unknown",
         )
-        raw = (resp.text or "").strip()
-        if not raw:
-            raise LLMProviderError("empty response body from gemini structured call")
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            raise LLMProviderError(f"gemini returned non-JSON despite schema: {raw[:300]}") from e
-        try:
-            return schema.model_validate(data)
-        except ValidationError as e:
-            raise LLMProviderError(f"gemini output failed schema validation: {e}") from e
+        repair_msgs = list(messages) + [
+            LLMMessage(
+                role="user",
+                content=(
+                    "Your previous response did not parse as valid JSON matching "
+                    f"the required schema. Error:\n{err}\n\n"
+                    "Previous response (first 1000 chars):\n"
+                    f"{raw[:1000]}\n\n"
+                    "Re-emit ONLY a single valid JSON object matching the schema. "
+                    "No markdown, no code fences, no commentary."
+                ),
+            ),
+        ]
+        obj, _, err2 = _attempt(repair_msgs)
+        if obj is not None:
+            logger.info("[gemini] structured output recovered after repair re-ask")
+            return obj
+        raise LLMProviderError(
+            f"gemini structured output failed after repair re-ask: {err2 or err}"
+        )
 
     def classify_grounding_depth(self, prompt: str) -> GroundingDepth:
         msg = LLMMessage(role="user", content=_DEPTH_CLASSIFIER_PROMPT.format(prompt=prompt))
@@ -456,7 +570,7 @@ def build_from_env(
     api_key_env: str,
     temperature: float,
     max_grounded_calls_per_run: int,
-    thinking_level: str = "medium",
+    thinking_level: str = "high",
 ) -> GeminiProvider:
     api_key = os.environ.get(api_key_env)
     if not api_key:

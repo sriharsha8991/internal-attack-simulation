@@ -1,0 +1,34 @@
+{
+  "ability_id": "d8d1a140-b21f-479d-8791-c9fc8d61a680",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T07:00:12.748537+00:00",
+  "ability": {
+    "name": "Step 6 \u2014 Targeted Service Fingerprinting",
+    "description": "Performs quick local service queries to grab banner responses on potential AD Domain Controllers.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "fingerprinting"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Banner_Grabbing",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { if (Test-Path \"C:\\Windows\\Temp\\bas\\live_hosts.txt\") { $hosts = Get-Content \"C:\\Windows\\Temp\\bas\\live_hosts.txt\" } else { $hosts = @(\"192.168.187.1\", \"192.168.187.141\", \"192.168.127.22\") }; foreach ($ip in $hosts) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$ip\") ; $dn = $de.Properties[\"defaultNamingContext\"].Value; if ($dn) { Write-Output \"LDAP_IP: $ip | DN: $dn\" } } catch {} }; \"Banner grabbing completed\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step6_out.txt",
+      "timeout_seconds": 300,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Queries LDAP RootDSE natively on confirmed live hosts to gather domain naming contexts.",
+  "provider": "APT-Planner",
+  "cited_urls": []
+}

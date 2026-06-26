@@ -19,7 +19,8 @@ without an LLM round-trip.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+import re
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -30,12 +31,58 @@ from ..models import AdversaryCreate, GeneratedAbility
 from ..persistence import ArtifactStore
 from ..skills import Skill
 from ..tools.skill_tool import SkillTool
+from .payload_catalog import PayloadCatalog
 from .prompt_profiles import PromptProfile, get_profile
 
 if TYPE_CHECKING:
     from ..orchestrator.state import SessionState
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_payload_cwd_usage(plan: "SpecialistPlan", catalog: PayloadCatalog) -> list[str]:
+    """Return validation errors for payload stages that do not use cwd syntax."""
+    errors: list[str] = []
+    search_re = re.compile(
+        r"\b(Get-Command|which|Get-ChildItem)\b|\bwhere(?:\.exe)?\s+|\b-Recurse\b",
+        re.IGNORECASE,
+    )
+    for gen in plan.abilities:
+        for stage in gen.stages:
+            if stage.payload_id is None:
+                continue
+            payload = catalog.by_id(stage.payload_id)
+            if payload is None or not payload.name:
+                continue
+            command = stage.command_template or ""
+            command_lower = command.lower()
+            payload_name = payload.name.strip()
+            payload_lower = payload_name.lower()
+            if payload_lower not in command_lower:
+                errors.append(
+                    f"{gen.ability.name}/{stage.stage_name}: payload_id {stage.payload_id} "
+                    f"requires invoking {payload_name!r} from the current directory"
+                )
+                continue
+            cwd_refs = (
+                f".\\{payload_lower}",
+                f"./{payload_lower}",
+            )
+            hardcoded_payload_path_re = re.compile(
+                r"[a-z]:\\[^\s'\";|]*" + re.escape(payload_lower),
+                re.IGNORECASE,
+            )
+            if not any(ref in command_lower for ref in cwd_refs):
+                errors.append(
+                    f"{gen.ability.name}/{stage.stage_name}: payload {payload_name!r} "
+                    "must be invoked with current-directory syntax such as .\\Tool.exe or ./tool"
+                )
+            if search_re.search(command) or hardcoded_payload_path_re.search(command):
+                errors.append(
+                    f"{gen.ability.name}/{stage.stage_name}: payload {payload_name!r} "
+                    "must not be located via PATH, recursive search, or hardcoded drive paths"
+                )
+    return errors
 
 
 # ----------------------------------------------------------------------------
@@ -48,6 +95,22 @@ class SpecialistPlan(BaseModel):
 
     adversary: AdversaryCreate
     abilities: list[GeneratedAbility] = Field(min_length=1)
+    route_hint: str | None = Field(
+        default=None,
+        description="Optional recommended next canonical phase after this plan executes.",
+    )
+    blocked_reason: str | None = Field(
+        default=None,
+        description="Set when the planner cannot safely produce an executable plan.",
+    )
+    required_ack: str | None = Field(
+        default=None,
+        description="Human ACK token required before this plan may be pushed.",
+    )
+    risk_level: Literal["low", "moderate", "high", "destructive"] = Field(
+        default="moderate",
+        description="Planner's risk classification for safety gating and audit.",
+    )
 
 
 class PushResult(BaseModel):
@@ -89,27 +152,28 @@ class Planner(Protocol):
 
 
 class LLMPlanner:
-    """Default planner — uses the configured LLM provider via structured output.
+    """Specialist planner driven by an LLM.
 
-    The system prompt is composed from a phase-scoped `PromptProfile` looked up
-    by the skill's `frontmatter.stage`, so different kill-chain phases can
-    inject different requirements / completion criteria without changing the
+    The instance is stateless; context is passed in on every call via the
     agent class.
     """
+
+    # We use LLM string matching to decide if evasion research is needed
+    # because the EDR string in memory can be anything.
+    _PHASE_RESEARCH_QUERIES = {
+        "evasion": "Red team command evasion, AMSI bypass, EDR unhooking",
+    }
 
     def __init__(
         self,
         llm: LLMProvider,
         *,
-        temperature: float = 0.2,
-        profile_resolver=None,
+        temperature: float | None = None,
+        catalog: PayloadCatalog | None = None,
     ) -> None:
         self._llm = llm
         self._temperature = temperature
-        # Hook lets callers override the skill -> profile mapping for tests.
-        self._profile_resolver = profile_resolver or (
-            lambda skill: get_profile(getattr(skill.frontmatter, "stage", None))
-        )
+        self._catalog = catalog
 
     # Keywords that hint the planner needs vendor-correct package ids /
     # install commands. Used to trigger an optional grounded preflight call.
@@ -189,7 +253,7 @@ class LLMPlanner:
         feedback: str | None = None,
     ) -> SpecialistPlan:
         skill_md = skill.render_for_prompt()
-        profile: PromptProfile = self._profile_resolver(skill)
+        profile: PromptProfile = get_profile(skill.frontmatter.stage)
 
         # ---- optional grounded preflight ------------------------------------
         # Gemini forbids combining `google_search` (grounding) with
@@ -200,15 +264,16 @@ class LLMPlanner:
         # grounding="skip".
         research_block = ""
 
-        # Phase-specific research — ONLY on retry / when prior commands were
-        # blocked or feedback mentions evasion.  First clean attempt relies on
-        # the skill playbook + model knowledge (saves a grounded call).
+        # Phase-specific research — always performed when a phase query exists.
+        # The prior classifier-gated approach almost never triggered research on
+        # first pass, leaving agents with stale knowledge. One grounded call per
+        # phase is cheap compared to a failed phase due to outdated TTPs.
         phase_stage = getattr(skill.frontmatter, "stage", None) or ""
         issues_to_fix = state.get("issues_to_fix") or []
         is_retry = bool(feedback) or bool(issues_to_fix)
-        needs_phase_research = is_retry and self._PHASE_RESEARCH_QUERIES.get(phase_stage.lower())
-        if needs_phase_research:
-            phase_query = self._PHASE_RESEARCH_QUERIES[phase_stage.lower()]
+        phase_query = self._PHASE_RESEARCH_QUERIES.get(phase_stage.lower())
+        needs_phase_research = bool(phase_query)
+        if needs_phase_research and phase_query:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
             phase_query_full = (
                 f"{phase_query}\n"
@@ -228,23 +293,36 @@ class LLMPlanner:
                 if rr.citations:
                     research_block += "\nSources: " + ", ".join(rr.citations[:6])
 
-        # Install/download-keyword research — tool acquisition help
-        if feedback and any(
+        # Tool acquisition research — triggers on retry when feedback mentions
+        # install keywords, AND proactively on first pass when the skill's
+        # tool_allowlist contains tools (likely non-native and need sourcing).
+        tool_allowlist = skill.frontmatter.tool_allowlist or []
+        _feedback_has_install_hint = feedback and any(
             kw in feedback.lower() for kw in self._INSTALL_KEYWORDS
-        ):
+        )
+        _first_pass_with_tools = not is_retry and bool(tool_allowlist)
+        if _feedback_has_install_hint or _first_pass_with_tools:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
-            tool_allow = ", ".join(skill.frontmatter.tool_allowlist or []) or "(none listed)"
+            tool_allow = ", ".join(tool_allowlist) or "(none listed)"
+            if feedback:
+                context_line = f"Feedback that triggered this: {feedback[:500]}"
+            else:
+                context_line = (
+                    "First-pass planning: proactively researching best tool "
+                    "usage, deployment methods, and native alternatives."
+                )
             query = (
                 "Red-team tool acquisition research.\n"
                 f"Foothold platform: {platform}.\n"
                 f"Skill tool allowlist: {tool_allow}.\n"
-                f"Feedback that triggered this: {feedback[:500]}\n\n"
+                f"{context_line}\n\n"
                 "Find the CURRENT best way to obtain and deploy the needed "
                 "tool(s) on this platform. Consider:\n"
                 "  - Latest working download sources\n"
                 "  - Package manager availability\n"
                 "  - In-memory execution alternatives\n"
                 "  - Native OS commands that achieve the same goal\n"
+                "  - Whether each tool is already built into the OS\n"
                 "Provide actionable results. No hardcoded assumptions."
             )
             try:
@@ -260,37 +338,50 @@ class LLMPlanner:
                 if rr.citations:
                     research_block += "\nCitations: " + ", ".join(rr.citations[:6])
 
-        # Blocked-command research — if prior attempt was blocked by security
-        blocked_hints = [i for i in issues_to_fix if "block" in i.lower() or "evas" in i.lower()]
-        if blocked_hints:
+        # Research — if prior attempt had issues (blocked, syntax, logic error, etc)
+        if issues_to_fix:
             platform = (state.get("foothold") or {}).get("platform") or "unknown"
             block_query = (
-                f"Red team command evasion for {platform} when EDR/AV blocks commands. "
-                f"Specific issues: {'; '.join(blocked_hints[:3])}. "
-                f"Provide alternative LOLBin commands, encoded execution, "
-                f"or AMSI bypass techniques that achieve the same goal."
+                f"Red team command syntax, execution and evasion for {platform}. "
+                f"Specific issues from previous run: {'; '.join(issues_to_fix[:3])}. "
+                f"Provide correct LOLBin commands, encoded execution, or fixes "
+                f"that achieve the goal without timing out or failing."
             )
             try:
                 rr = self._llm.research(block_query, depth="light")
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[plan] evasion research failed: %s", exc)
+                logger.warning("[plan] research failed: %s", exc)
                 rr = None
             if rr and rr.text:
                 research_block += (
-                    "\n\n--- EVASION RESEARCH (anti-blocking) ---\n"
+                    "\n\n--- RESEARCH (anti-blocking & syntax fixes) ---\n"
                     + rr.text.strip()
                 )
                 if rr.citations:
                     research_block += "\nSources: " + ", ".join(rr.citations[:6])
 
+        # Payload catalog block — list pre-uploaded binaries the on-target agent
+        # can fetch. The LLM may set `payload_id` on a stage to reference one.
+        payloads_block = ""
+        if self._catalog is not None:
+            platform_for_payloads = (state.get("foothold") or {}).get("platform")
+            payloads_block = self._catalog.render_planner_block(
+                phase_stage, platform_for_payloads
+            )
+
         system = (
             f"{profile.specialist_system}\n\n--- SKILL PLAYBOOK ---\n{skill_md}"
             + research_block
+            + payloads_block
         )
         user_payload = {
             "foothold": state.get("foothold", {}),
+            "kali_sidecar": state.get("kali_sidecar", {}),
+            "safety": state.get("safety", {}),
             "memory": state.get("memory", {}),
             "completed_stages": state.get("completed_stages", []),
+            "issues_to_fix": state.get("issues_to_fix", []),
+            "retry_feedback": state.get("retry_feedback", []),
             "run_id": state.get("run_id"),
         }
         import json
@@ -314,19 +405,9 @@ class LLMPlanner:
         ]
         # Structured output ALWAYS ungrounded (provider constraint).
         plan = self._llm.generate_structured(
-            msgs, SpecialistPlan, grounding="skip", temperature=self._temperature
+            msgs, SpecialistPlan, grounding="skip", temperature=self._temperature,
+            thinking="high",  # generating tradecraft needs deep reasoning
         )
-
-        # ---- self-critique (lightweight internal review) --------------------
-        # Before handing to the evaluator, the planner does ONE self-review
-        # pass. If it finds issues, it re-generates the plan with the critique
-        # spliced in. This catches obvious misses (wrong platform commands,
-        # unreferenced variables, missing install steps) without burning an
-        # evaluator round-trip.
-        try:
-            plan = self._self_critique(plan, skill, state, system)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[plan/self-critique] failed: %s; using original plan", exc)
 
         # ---- shell-native syntax validation (every plan) -------------------
         # Fast subprocess call (< 100ms per command) using real shell parsers.
@@ -347,8 +428,12 @@ class LLMPlanner:
 
             user_payload2 = {
                 "foothold": state.get("foothold", {}),
+                "kali_sidecar": state.get("kali_sidecar", {}),
+                "safety": state.get("safety", {}),
                 "memory": state.get("memory", {}),
                 "completed_stages": state.get("completed_stages", []),
+                "issues_to_fix": state.get("issues_to_fix", []),
+                "retry_feedback": state.get("retry_feedback", []),
                 "run_id": state.get("run_id"),
             }
             fix_parts = [
@@ -371,6 +456,7 @@ class LLMPlanner:
                 plan = self._llm.generate_structured(
                     fix_msgs, SpecialistPlan, grounding="skip",
                     temperature=self._temperature,
+                    thinking="high",
                 )
                 logger.info("[plan/shell-validate] re-generated plan after syntax fix")
             except Exception as exc:  # noqa: BLE001
@@ -388,128 +474,6 @@ class LLMPlanner:
                 logger.warning("[plan/validate_commands] failed: %s; using plan as-is", exc)
 
         return plan
-
-    # ---- self-critique helper -----------------------------------------------
-
-    _SELF_CRITIQUE_PROMPT = (
-        "You are the same red-team operator who just drafted the plan below.\n"
-        "Review it against these checks and emit a SHORT numbered list of\n"
-        "issues ONLY. If the plan is clean, respond with exactly: LGTM\n"
-        "\n"
-        "CHECKS:\n"
-        "  1. PLACEHOLDER / TEMPLATE TOKENS: Scan every command_template for\n"
-        "     tokens like #{...}, <TARGET>, <CIDR>, {{...}}. These are NEVER\n"
-        "     substituted at runtime. If any exist, the command will fail.\n"
-        "     Fix: compute the value inline or read from a file written by\n"
-        "     an earlier ability.\n"
-        "  2. CROSS-ABILITY VARIABLE LEAKAGE: Each ability runs in a FRESH\n"
-        "     shell session. A variable set in ability A is empty in\n"
-        "     ability B. Fix: pass data between abilities via files in the\n"
-        "     temp directory.\n"
-        "  3. Every non-builtin tool has a check+install ability before its\n"
-        "     first use — a single inline if/else pattern (check → install\n"
-        "     → verify). NOT two separate check and install abilities.\n"
-        "  4. Output paths use the platform's standard temp directory under\n"
-        "     a 'bas' subdirectory. Create the dir if it might not exist.\n"
-        "  5. No unnecessary output filters on raw collection commands;\n"
-        "     capture full output when gathering intel.\n"
-        "  6. Platform consistency: all commands must be native to the\n"
-        "     foothold's platform.\n"
-        "  7. TOOL AVAILABILITY: If the plan uses ANY tool that is not a\n"
-        "     default OS binary, verify there is a check+acquire step\n"
-        "     BEFORE its first use. The agent must figure out how to\n"
-        "     obtain the tool based on the environment (available runtimes,\n"
-        "     transfer utilities, network access, package managers). If no\n"
-        "     acquisition step exists and the tool is not built-in, flag it.\n"
-        "  8. EVASION READINESS: Check if any command uses well-known\n"
-        "     offensive tool names in the command string that AV/EDR\n"
-        "     would signature-match. These should use renamed binaries\n"
-        "     or in-memory execution.\n"
-        "  9. SHELL SYNTAX: Every command_template MUST be syntactically\n"
-        "     valid for its executor. Common mistakes to flag:\n"
-        "     - PowerShell: unbalanced { } ( ) or quotes; bare $_ outside\n"
-        "       a pipeline block (ForEach-Object, Where-Object); missing\n"
-        "       semicolons between statements; unescaped embedded quotes\n"
-        "       (use backtick ` to escape); broken regex patterns.\n"
-        "     - Bash/sh: unbalanced quotes or backticks; missing command\n"
-        "       separators (;, &&, ||); unclosed if/for/while blocks;\n"
-        "       unescaped special characters in strings.\n"
-        "     - Cmd: unbalanced parentheses or quotes; dangling pipes or\n"
-        "       redirects; incorrect FOR /F syntax.\n"
-        "     If in doubt, simplify: break a complex one-liner into\n"
-        "     multiple stages rather than risk a syntax error.\n"
-    )
-
-    def _self_critique(
-        self,
-        plan: SpecialistPlan,
-        skill: Skill,
-        state: "SessionState",
-        system_prompt: str,
-    ) -> SpecialistPlan:
-        """One-shot self-review. Returns original plan if LGTM, else re-plans."""
-        import json as _json
-
-        summary = []
-        for gen in plan.abilities:
-            stages_compact = [
-                {"order": s.stage_order, "executor": s.executor,
-                 "cmd": s.command_template}
-                for s in gen.stages
-            ]
-            summary.append({
-                "name": gen.ability.name,
-                "mitre_technique_id": gen.ability.mitre_technique_id,
-                "platform": gen.ability.platform,
-                "stages": stages_compact,
-            })
-
-        review_msg = (
-            "Plan to review:\n"
-            + _json.dumps(summary, indent=2, default=str)
-            + "\n\nFoothold: "
-            + _json.dumps(state.get("foothold", {}), indent=2, default=str)
-            + "\n\nMemory keys: "
-            + str(list((state.get("memory") or {}).keys()))
-        )
-        msgs = [
-            LLMMessage(role="system", content=self._SELF_CRITIQUE_PROMPT),
-            LLMMessage(role="user", content=review_msg),
-        ]
-        critique = self._llm.chat(msgs, grounding="skip", temperature=0.0)
-        critique = critique.strip()
-
-        if not critique or critique.upper().startswith("LGTM"):
-            logger.info("[plan/self-critique] plan passed self-review")
-            return plan
-
-        logger.info(
-            "[plan/self-critique] found issues, re-generating: %s",
-            critique[:300],
-        )
-        # Re-plan with the critique as additional feedback.
-        user_payload = {
-            "foothold": state.get("foothold", {}),
-            "memory": state.get("memory", {}),
-            "completed_stages": state.get("completed_stages", []),
-            "run_id": state.get("run_id"),
-        }
-        user_parts = [
-            "Emit a SpecialistPlan as JSON matching the schema.",
-            "Session context follows:",
-            "",
-            _json.dumps(user_payload, indent=2, default=str),
-            "",
-            "--- SELF-CRITIQUE (fix every issue below) ---",
-            critique,
-        ]
-        msgs2 = [
-            LLMMessage(role="system", content=system_prompt),
-            LLMMessage(role="user", content="\n".join(user_parts)),
-        ]
-        return self._llm.generate_structured(
-            msgs2, SpecialistPlan, grounding="skip", temperature=self._temperature
-        )
 
     def _validate_commands(
         self,
@@ -556,8 +520,12 @@ class LLMPlanner:
 
         user_payload = {
             "foothold": state.get("foothold", {}),
+            "kali_sidecar": state.get("kali_sidecar", {}),
+            "safety": state.get("safety", {}),
             "memory": state.get("memory", {}),
             "completed_stages": state.get("completed_stages", []),
+            "issues_to_fix": state.get("issues_to_fix", []),
+            "retry_feedback": state.get("retry_feedback", []),
             "run_id": state.get("run_id"),
         }
         user_parts = [
@@ -682,11 +650,42 @@ def push_specialist(
     bas: BasClient,
     artifacts: ArtifactStore | None = None,
     provider_id: str | None = None,
+    catalog: PayloadCatalog | None = None,
 ) -> PushResult:
     """Push an already-approved `SpecialistPlan` to BAS and write artifacts."""
     skill_name = state.get("next_stage") or ""
     if not skill_name or skill_name == "DONE" or not skill_tool.has(skill_name):
         return PushResult(skill=skill_name, success=False, error="no skill to push")
+
+    # Defense in depth against an LLM that emits a syntactically-valid UUID
+    # that doesn't actually exist in the backend's payload catalog. Pydantic
+    # only validates UUID *format*, not membership. Drop unknown IDs to null
+    # rather than failing the push.
+    if catalog is not None:
+        known = catalog.known_ids()
+        if known:  # only filter when we actually have a catalog to compare against
+            for gen in plan.abilities:
+                for stage in gen.stages:
+                    if stage.payload_id is None:
+                        continue
+                    if str(stage.payload_id) not in known:
+                        logger.warning(
+                            "[push] dropping unknown payload_id %s on stage %s "
+                            "(not in backend catalog)",
+                            stage.payload_id,
+                            stage.stage_name,
+                        )
+                        stage.payload_id = None
+
+        payload_cwd_errors = _validate_payload_cwd_usage(plan, catalog)
+        if payload_cwd_errors:
+            error_report = "\n".join(f"- {err}" for err in payload_cwd_errors)
+            logger.warning("[push] payload command validation failed:\n%s", error_report)
+            return PushResult(
+                skill=skill_name,
+                success=False,
+                error="payload command validation failed:\n" + error_report,
+            )
 
     # ---- 1b. Shell-native syntax validation (pre-push gate) -----------------
     # Parse every command_template through the real shell parser to catch

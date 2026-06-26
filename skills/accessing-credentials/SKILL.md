@@ -63,6 +63,11 @@ full provenance (`source`, `usable_for`, `validated_against`).
 5. Templated commands: [reference/tool-commands.md](reference/tool-commands.md).
    Full technique catalogue: [reference/techniques.md](reference/techniques.md).
 
+PowerShell retry safety: when interpolating variables next to punctuation,
+always delimit variable names (`${spn}:`, `$($spn):`) or use `-f` formatting.
+Do not emit strings like `"Failed for $spn: $_"`; PowerShell parses `$spn:` as
+an invalid scoped variable and the stage will fail before requesting tickets.
+
 ## Preconditions
 
 - Local admin / SYSTEM on the source host for any LSASS / SAM / DPAPI
@@ -141,6 +146,14 @@ Always try in this order; stop on first success.
 - "Kerberoast returned 0 hashes despite D9 listing SPNs → RC4 likely disabled
   for those accounts. Re-request with AES and route to hashcat mode 19700/
   19600 instead of 13100."
+- "Kerberoast fallback failed with `psh_parse_error` or
+  `InvalidVariableReferenceWithDrive` → fix variable interpolation using
+  `${spn}` or format strings before changing technique. Do not retry the same
+  command template."
+- "stdout/stderr contains ERROR, failed, access denied, unsupported parameter,
+  or type-not-found even with exit code 0 → treat as a failed step and use
+  retry_feedback to change syntax/tooling. Valid empty roast results should be
+  emitted as NONE/OK, not failed."
 - "LSASS dump produced a 0-byte file → AV truncated; switch tool. Do not
   re-run the same tool."
 - "DCSync `Logon failure` despite BloodHound showing the edge → the right may
