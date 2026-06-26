@@ -1,0 +1,34 @@
+{
+  "ability_id": "4f6b5d1f-721f-42fc-b2b0-0a77171b6bef",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T12:09:40.477617+00:00",
+  "ability": {
+    "name": "Step 7 \u2014 DC gate",
+    "description": "Process and analyze active network signatures, perform active directory root context tests, and dynamically resolve correct next-stage routing.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "Low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "router-gate"
+    ],
+    "created_by": "ai",
+    "engagement_id": "452238f1766e403db19618a864fbc2a6"
+  },
+  "stages": [
+    {
+      "stage_name": "Gate Evaluation",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $error.Clear(); $dcIp = $null; $baseDn = $null; if (Test-Path \"$d\\services.json\") { $services = Get-Content \"$d\\services.json\" | ConvertFrom-Json; foreach ($ip in $services.psobject.Properties.Name) { $ports = $services.$ip; $hasLdap = $false; $hasKerb = $false; foreach ($p in $ports) { if ($p.port -eq 389 -or $p.port -eq 636) { $hasLdap = $true }; if ($p.port -eq 88) { $hasKerb = $true } }; if ($hasLdap -or $hasKerb) { $dcIp = $ip; break } } }; if ($dcIp) { Write-Output \"DC_IP: $dcIp\"; try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$dcIp/RootDSE\"); $baseDn = $de.Properties['defaultNamingContext'].Value; $dnsHostName = $de.Properties['dnsHostName'].Value; if ($baseDn) { Write-Output \"BASE_DN: $baseDn\"; Write-Output \"DC_HOSTNAME: $dnsHostName\"; Write-Output \"HAS_DOMAIN_CONTROLLER: true\"; Write-Output \"RECON_AD_PRESENT: true\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { throw 'Base DN resolved to null' } } catch { Write-Output \"WARN: RootDSE LDAP lookup failed, using fallback domain resolution\"; $cs = Get-WmiObject Win32_ComputerSystem; if ($cs.PartOfDomain) { Write-Output \"HAS_DOMAIN_CONTROLLER: true\"; Write-Output \"RECON_AD_PRESENT: true\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"HAS_DOMAIN_CONTROLLER: false\"; Write-Output \"RECON_AD_PRESENT: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } } else { Write-Output \"HAS_DOMAIN_CONTROLLER: false\"; Write-Output \"RECON_AD_PRESENT: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"HAS_DOMAIN_CONTROLLER: false\"; Write-Output \"RECON_AD_PRESENT: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\"; Write-Output \"ERROR: $_\" }) | Tee-Object -FilePath $d\\dc_gate.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Secures proper phase routing and retrieves Base Distinguished Name context from active target controller LDAP endpoints.",
+  "provider": "Lead Red-Team Operator",
+  "cited_urls": []
+}

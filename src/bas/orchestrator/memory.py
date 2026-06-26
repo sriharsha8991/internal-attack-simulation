@@ -67,7 +67,12 @@ def _deep_merge(base: dict, delta: dict) -> dict:
     return out
 
 
-def project_for_prompt(mem: dict[str, Any]) -> dict[str, Any]:
+def project_for_prompt(
+    mem: dict[str, Any],
+    *,
+    max_narratives: int | None = DEFAULT_PROMPT_NARRATIVES,
+    drop_pending: bool = True,
+) -> dict[str, Any]:
     """Return a reduced copy of ``memory`` suitable for an LLM prompt.
 
     Strips speculative ``pending.*`` keys (internal bookkeeping with no signal
@@ -76,15 +81,15 @@ def project_for_prompt(mem: dict[str, Any]) -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
     for k, v in mem.items():
-        if k.startswith(_PENDING_PREFIX):
+        if drop_pending and k.startswith(_PENDING_PREFIX):
             continue
         if (
             k == "narratives"
             and isinstance(v, list)
-            and DEFAULT_PROMPT_NARRATIVES is not None
-            and len(v) > DEFAULT_PROMPT_NARRATIVES
+            and max_narratives is not None
+            and len(v) > max_narratives
         ):
-            out[k] = v[-DEFAULT_PROMPT_NARRATIVES:]
+            out[k] = v[-max_narratives:]
         else:
             out[k] = v
     return out

@@ -31,9 +31,15 @@ class AbilitiesApi:
     ) -> AbilityStageResponse:
         if self._dry:
             return _dry.fake_stage(ability_id, stage)
+        
+        # Serialize UUID fields to string before passing to json encoder to avoid TypeError
+        payload = stage.model_dump(exclude_none=True)
+        if "payload_id" in payload and payload["payload_id"]:
+            payload["payload_id"] = str(payload["payload_id"])
+
         data = self._t.post_json(
             f"/abilities/{ability_id}/stages",
-            json=stage.model_dump(exclude_none=True),
+            json=payload,
         )
         self._t.pause()
         return AbilityStageResponse.model_validate(data)

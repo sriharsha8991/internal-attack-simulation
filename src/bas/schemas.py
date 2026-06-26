@@ -26,6 +26,22 @@ class TargetHint(BaseModel):
     platform: PlatformLiteral | None = None
 
 
+class SafetyContext(BaseModel):
+    """Human-provided safety approvals and scope hints for gated actions."""
+
+    acks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Explicit human ACK tokens for high-risk/destructive actions. "
+            "Examples: dcsync, byovd, persistence.tier0, impact.ransomware."
+        ),
+    )
+    simulations: list[str] = Field(
+        default_factory=list,
+        description="Optional names of explicitly scoped simulation types.",
+    )
+
+
 class EngagementCreateRequest(BaseModel):
     """Minimum trigger payload — everything else is auto-resolved."""
 
@@ -33,13 +49,14 @@ class EngagementCreateRequest(BaseModel):
         default=None,
         description=(
             "Kill-chain phases to execute, in order. "
-            "Accepted values: discovery, privesc, credaccess, lateral, "
+            "Accepted values: discovery, ad-enumeration, privesc, credaccess, lateral, "
             "persistence, defevasion, impact. "
             "Aliases like 'recon', 'priv-esc', 'credential-access' are "
             "also accepted and normalised automatically. "
-            "When omitted, the LLM router decides each step."
+            "When omitted or empty, the orchestrator runs all known phases "
+            "in canonical kill-chain order."
         ),
-        examples=[["discovery"], ["discovery", "privesc"]],
+        examples=[None, [], ["discovery"], ["discovery", "ad-enumeration", "privesc"]],
     )
 
     @field_validator("phases", mode="before")
@@ -68,6 +85,10 @@ class EngagementCreateRequest(BaseModel):
     target: TargetHint | None = Field(
         default=None,
         description="Preferences for picking the foothold agent.",
+    )
+    safety: SafetyContext = Field(
+        default_factory=SafetyContext,
+        description="Safety approvals and scope hints enforced before high-risk push.",
     )
     max_iterations: int = Field(
         default=20,

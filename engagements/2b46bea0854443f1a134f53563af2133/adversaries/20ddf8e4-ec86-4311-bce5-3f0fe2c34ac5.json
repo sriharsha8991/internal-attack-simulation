@@ -1,0 +1,23 @@
+{
+  "adversary_id": "20ddf8e4-ec86-4311-bce5-3f0fe2c34ac5",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:30.422981+00:00",
+  "adversary": {
+    "name": "APT-AD-Enumeration-Operator",
+    "description": "An adversary profile designed to conduct comprehensive and quiet enumeration of Active Directory structures, domain controllers, trusts, and high-privilege targets from an established foothold.",
+    "profile": "APT-AD-ENUM",
+    "execution_strategy": "Iterative and robust PowerShell-based LDAP queries followed by targeted tool execution for bloodhound, AD CS, and session mapping.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "1ab081e1-a2eb-42f6-81c6-f712c281ab3b",
+    "21872ef8-416b-4bbe-8aa6-127568f2cbed",
+    "6705cf4a-cd46-4a47-9f75-402df0ecb332",
+    "c0c15857-9a78-4de8-9c87-ffc7acd7edc0",
+    "38422216-e68e-4f2d-8852-52150f663e6e",
+    "4a48a51b-4e05-4f29-b176-853111c9885a"
+  ]
+}

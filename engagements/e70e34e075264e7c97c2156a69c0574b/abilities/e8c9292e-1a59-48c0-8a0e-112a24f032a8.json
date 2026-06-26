@@ -1,0 +1,33 @@
+{
+  "ability_id": "e8c9292e-1a59-48c0-8a0e-112a24f032a8",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T06:36:53.336468+00:00",
+  "ability": {
+    "name": "Domain Controller and Pivot Evaluation Gate",
+    "description": "Inspects the collected subnet services, resolves local domain controller properties, and specifies transition pathways to subsequent phases based on directory services detection.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "gate"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "evaluate_gate",
+      "stage_order": 6,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $dcIp = $null; $svcFile = 'C:\\Windows\\Temp\\bas\\services.json'; if (Test-Path $svcFile) { $svcs = Get-Content $svcFile | ConvertFrom-Json; foreach ($ip in $svcs.PSObject.Properties.Name) { $ports = $svcs.$ip | Select-Object -ExpandProperty port; if (($ports -contains 88) -and ($ports -contains 389 -or $ports -contains 636)) { $dcIp = $ip; break } } }; $domainJoined = $false; try { $cs = Get-WmiObject Win32_ComputerSystem; if ($cs.PartOfDomain) { $domainJoined = $true } } catch {}; if ($dcIp) { Write-Output \"DC_FOUND: true\"; Write-Output \"DC_IP: $dcIp\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } elseif ($domainJoined) { try { $dc = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().DomainControllers[0]; $dcIp = $dc.IPAddress; Write-Output \"DC_FOUND: true\"; Write-Output \"DC_IP: $dcIp\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"ERROR: step7 $($_.Exception.Message)\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\" }) | Tee-Object -FilePath $d\\dc_gate.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "An analytical check must confirm the presence of a reachable domain controller. When confirmed, Active Directory domain queries are unlocked, routing execution immediately to advanced AD-Enumeration (Phase B).",
+  "provider": "Native",
+  "cited_urls": []
+}

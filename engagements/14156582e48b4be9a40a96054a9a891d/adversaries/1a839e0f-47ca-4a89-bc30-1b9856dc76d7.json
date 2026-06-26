@@ -1,0 +1,23 @@
+{
+  "adversary_id": "1a839e0f-47ca-4a89-bc30-1b9856dc76d7",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:10.994344+00:00",
+  "adversary": {
+    "name": "APT-Environment-Explorer",
+    "description": "An adversary configuration executing stealthy AD and environment discovery starting with local subnets, host mappings, and directory service validations.",
+    "profile": "APT-Environment-Explorer",
+    "execution_strategy": "sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "linked_ability_ids": [
+    "24f989e6-6dff-4573-a7d9-25b7bea544bc",
+    "f21b9d83-e119-4c6c-b7e9-1599f4466430",
+    "1631e481-77e2-4b48-98d3-d45ca2cf5646",
+    "1e6864e4-6cae-44bf-9dd0-8e091d940d9e",
+    "095c7b18-a6fc-4fc9-b98d-bae487fac3dd",
+    "d0b5b0a6-883f-40a6-aa15-4d19d0d2d50f"
+  ]
+}

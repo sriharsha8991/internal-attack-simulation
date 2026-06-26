@@ -126,6 +126,14 @@ def test_known_ids_skips_entries_without_id():
     assert cat.known_ids() == set()
 
 
+def test_by_id_returns_payload_metadata():
+    cat = PayloadCatalog(entries=_make_entries())
+    entry = cat.by_id(str(SHARP_ID))
+    assert entry is not None
+    assert entry.name == "SharpHound.exe"
+    assert cat.by_id("00000000-0000-0000-0000-000000000000") is None
+
+
 # ---------------------------------------------------------------------------
 # render_planner_block
 # ---------------------------------------------------------------------------
@@ -139,6 +147,9 @@ def test_render_planner_block_contains_uuid_verbatim():
     assert "SharpHound.exe" in block
     # The anti-hallucination rules must be present.
     assert "NEVER invent a payload_id" in block
+    assert ".\\SharpHound.exe" in block
+    assert "current execution directory" in block
+    assert "already on PATH" not in block
     # Wrong-phase IDs must not leak into a discovery-only block.
     assert str(LINPEAS_ID) not in block
 
@@ -219,6 +230,40 @@ def test_fetch_populates_from_payloads_list():
 
 
 # ---------------------------------------------------------------------------
+# Structured planner hints
+# ---------------------------------------------------------------------------
+
+
+def test_specialist_plan_accepts_structured_routing_and_safety_hints():
+    from bas.agents.specialist import SpecialistPlan
+    from bas.models import (
+        AbilityCreate,
+        AbilityStageCreate,
+        AdversaryCreate,
+        GeneratedAbility,
+    )
+
+    plan = SpecialistPlan(
+        adversary=AdversaryCreate(name="adv"),
+        abilities=[
+            GeneratedAbility(
+                ability=AbilityCreate(name="ab"),
+                stages=[AbilityStageCreate(stage_name="s", stage_order=1)],
+                rationale="test",
+                grounding_depth="skip",
+                provider="test",
+            )
+        ],
+        route_hint="accessing-credentials",
+        required_ack="dcsync",
+        risk_level="destructive",
+    )
+    assert plan.route_hint == "accessing-credentials"
+    assert plan.required_ack == "dcsync"
+    assert plan.risk_level == "destructive"
+
+
+# ---------------------------------------------------------------------------
 # push_specialist drops hallucinated payload_ids
 # ---------------------------------------------------------------------------
 
@@ -253,7 +298,7 @@ def test_push_specialist_drops_unknown_payload_id(monkeypatch):
                         stage_name="legit",
                         stage_order=1,
                         executor="cmd",
-                        command_template="SharpHound.exe",
+                        command_template=".\\SharpHound.exe",
                         payload_id=SHARP_ID,  # real, must survive
                     ),
                     AbilityStageCreate(
@@ -325,3 +370,133 @@ def test_push_specialist_drops_unknown_payload_id(monkeypatch):
     assert captured_stages[0].payload_id == SHARP_ID
     # Hallucinated payload was nulled out before POST.
     assert captured_stages[1].payload_id is None
+
+
+def test_push_specialist_rejects_payload_stage_that_uses_path_lookup():
+    from bas.agents.specialist import SpecialistPlan, push_specialist
+    from bas.models import AbilityCreate, AbilityStageCreate, AdversaryCreate, GeneratedAbility
+
+    catalog = PayloadCatalog(entries=_make_entries())
+    plan = SpecialistPlan(
+        adversary=AdversaryCreate(name="test-adv"),
+        abilities=[
+            GeneratedAbility(
+                ability=AbilityCreate(name="test-ab", platform="windows"),
+                stages=[
+                    AbilityStageCreate(
+                        stage_name="bad-payload",
+                        stage_order=1,
+                        executor="powershell",
+                        command_template="Get-Command SharpHound.exe; SharpHound.exe -c All",
+                        payload_id=SHARP_ID,
+                    ),
+                ],
+                rationale="test",
+                grounding_depth="skip",
+                provider="test",
+            ),
+        ],
+    )
+
+    class _FakeSkillTool:
+        def has(self, name):
+            return True
+
+    class _FakeBasClient:
+        pass
+
+    result = push_specialist(
+        {"next_stage": "fake-skill", "run_id": "engagement-test"},
+        plan=plan,
+        skill_tool=_FakeSkillTool(),
+        bas=_FakeBasClient(),
+        artifacts=None,
+        catalog=catalog,
+    )
+
+    assert not result.success
+    assert result.error is not None
+    assert "payload command validation failed" in result.error
+    assert "current-directory syntax" in result.error
+
+
+def test_push_specialist_allows_payload_with_artifact_output_path():
+    from uuid import UUID
+
+    from bas.agents.specialist import SpecialistPlan, push_specialist
+    from bas.models import (
+        AbilityCreate,
+        AbilityResponse,
+        AbilityStageCreate,
+        AbilityStageResponse,
+        AdversaryCreate,
+        AdversaryResponse,
+        GeneratedAbility,
+    )
+
+    catalog = PayloadCatalog(entries=_make_entries())
+    plan = SpecialistPlan(
+        adversary=AdversaryCreate(name="test-adv"),
+        abilities=[
+            GeneratedAbility(
+                ability=AbilityCreate(name="test-ab", platform="windows"),
+                stages=[
+                    AbilityStageCreate(
+                        stage_name="good-payload",
+                        stage_order=1,
+                        executor="powershell",
+                        command_template=".\\SharpHound.exe -CollectionMethod Default -OutputDirectory C:\\Windows\\Temp\\bas",
+                        payload_id=SHARP_ID,
+                    ),
+                ],
+                rationale="test",
+                grounding_depth="skip",
+                provider="test",
+            ),
+        ],
+    )
+
+    class _FakeAbilities:
+        def create(self, ability):
+            return AbilityResponse(
+                ability_id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                name=ability.name,
+            )
+
+        def create_stage(self, ability_id, stage):
+            return AbilityStageResponse(
+                stage_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                ability_id=UUID(str(ability_id)),
+                stage_name=stage.stage_name,
+                stage_order=stage.stage_order,
+                payload_id=stage.payload_id,
+            )
+
+    class _FakeAdversaries:
+        def create(self, adv):
+            return AdversaryResponse(
+                adversary_id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+                name=adv.name,
+            )
+
+        def link_ability(self, adv_id, ab_id):
+            return True
+
+    class _FakeBasClient:
+        abilities = _FakeAbilities()
+        adversaries = _FakeAdversaries()
+
+    class _FakeSkillTool:
+        def has(self, name):
+            return True
+
+    result = push_specialist(
+        {"next_stage": "fake-skill", "run_id": "engagement-test"},
+        plan=plan,
+        skill_tool=_FakeSkillTool(),
+        bas=_FakeBasClient(),
+        artifacts=None,
+        catalog=catalog,
+    )
+
+    assert result.success

@@ -88,6 +88,12 @@ Build a factual, evidence-driven inventory of the network and — when a domain
 controller is confirmed in scope — a complete Active Directory attack-surface
 map covering all D1–D20 techniques from `reference/techniques.md`.
 
+Success is evidence-based, not operation-status-based. Any stdout/stderr marker
+such as `ERROR`, `failed`, `Unable to find type`, unsupported parameter, or
+access denied means that step needs fallback/retry even if the backend exit code
+is 0. Valid empty findings must be emitted as `NONE:` or `OK:` so the analyzer
+can distinguish checked-empty from failed.
+
 ** START HERE every time you land on a new machine. Map before you attack.**
 
 **Step 0 is mandatory on every machine — first foothold and every lateral-movement hop.**

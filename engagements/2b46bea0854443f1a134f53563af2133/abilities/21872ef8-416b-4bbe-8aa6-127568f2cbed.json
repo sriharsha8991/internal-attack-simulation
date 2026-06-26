@@ -1,0 +1,34 @@
+{
+  "ability_id": "21872ef8-416b-4bbe-8aa6-127568f2cbed",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:25.451531+00:00",
+  "ability": {
+    "name": "User and Password Policy Enumeration",
+    "description": "Lists all domain users and retrieves the domain password policy via ADSI to ensure safe operational planning.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1087.002",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "ad-enumeration",
+      "users"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Enumerate Users and Password Policy",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcher = [adsisearcher]'(objectCategory=person)'; $searcher.PageSize = 1000; $users = $searcher.FindAll(); $users | ForEach-Object { $_.Properties.samaccountname } | Out-File -FilePath $d\\users.txt; $domainEntry = [ADSI]''; $maxPwdAge = $domainEntry.Properties.maxpwdage; Write-Output \"Max Password Age: $maxPwdAge\" | Out-File -FilePath $d\\password_policy.txt } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\user_enumeration_out.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Fulfills the critical requirement of documenting domain users and policies prior to any access attempts.",
+  "provider": "system",
+  "cited_urls": []
+}

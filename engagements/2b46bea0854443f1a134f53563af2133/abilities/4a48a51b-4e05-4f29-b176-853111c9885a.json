@@ -1,0 +1,33 @@
+{
+  "ability_id": "4a48a51b-4e05-4f29-b176-853111c9885a",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:28.048329+00:00",
+  "ability": {
+    "name": "Active Directory BloodHound Collection",
+    "description": "Runs SharpHound collector to produce deep relationship mapping data inside the domain.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1069.002",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "bloodhound-collection"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Execute SharpHound Collector",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { SharpHound.exe --CollectionMethods Default --OutputDirectory $d } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\sharphound_out.txt",
+      "timeout_seconds": 300,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Generates the necessary bloodhound output file required to proceed beyond standard AD enumeration.",
+  "provider": "system",
+  "cited_urls": []
+}

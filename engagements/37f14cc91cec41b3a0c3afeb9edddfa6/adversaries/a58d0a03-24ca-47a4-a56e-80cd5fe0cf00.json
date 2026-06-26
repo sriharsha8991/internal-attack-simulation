@@ -1,0 +1,25 @@
+{
+  "adversary_id": "a58d0a03-24ca-47a4-a56e-80cd5fe0cf00",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:05:56.013493+00:00",
+  "adversary": {
+    "name": "Stealth_AD_Discovery",
+    "description": "Multi-phase progressive Active Directory and Network Discovery agent executing Phase A with multi-homing capability, low-noise EDR inspection, and fallback checks.",
+    "profile": "APT",
+    "execution_strategy": "Sequential",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "37f14cc91cec41b3a0c3afeb9edddfa6"
+  },
+  "linked_ability_ids": [
+    "3d0901dd-e7fa-4134-bf2d-14e68ee7e9d5",
+    "e0ec76ae-46de-44c9-a5a7-fb52ed0a1560",
+    "b4171b4d-9857-4269-bb61-cb657e3bcb34",
+    "7e4d1897-7c63-4d54-86a2-2b496602ba57",
+    "652f135a-3479-4e65-97f5-2a9f1187b2cc",
+    "64982ddb-e11f-44fe-a9ec-0f5e000f4204",
+    "99a9fe19-ea45-4bb2-997e-986ae37870e2",
+    "2eed77af-42fa-44f9-9a2e-a443eb4b1483"
+  ]
+}

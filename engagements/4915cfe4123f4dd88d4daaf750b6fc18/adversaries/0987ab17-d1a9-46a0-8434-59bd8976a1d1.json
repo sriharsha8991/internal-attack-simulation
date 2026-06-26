@@ -1,0 +1,23 @@
+{
+  "adversary_id": "0987ab17-d1a9-46a0-8434-59bd8976a1d1",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:28:23.619575+00:00",
+  "adversary": {
+    "name": "Stealthy Subnet Discovery & DC Gatekeeper Emulation",
+    "description": "Emulates an advanced persistent threat executing network-level host sweeps and port scans with rigorous EDR/AV enumeration and AD Domain Controller validation using custom parsers and error-safe fallbacks.",
+    "profile": "APT-Discovery",
+    "execution_strategy": "Sequential Phase A Network Mapping with Resilient Parsers",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "linked_ability_ids": [
+    "64802d38-9e7f-4c5d-9a18-905602acd09c",
+    "913d2163-242d-432e-8df2-d70d4dd7ab1a",
+    "043ece5d-a197-4d97-8347-5693b872ce9f",
+    "94449b63-390e-4442-88dc-b3b2cabf139a",
+    "a80c02ca-90af-484a-86f9-081bed01803f",
+    "ae219279-c0bb-48cd-9fd5-be5cf7906232"
+  ]
+}

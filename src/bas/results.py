@@ -86,6 +86,10 @@ class IssueKind(str, Enum):
     TIMEOUT = "timeout"
     CROSS_VAR_LEAK = "cross_var_leak"
     PSH_PARSE_ERROR = "psh_parse_error"
+    ERROR_MARKER = "error_marker"
+    TYPE_NOT_FOUND = "type_not_found"
+    UNSUPPORTED_PARAMETER = "unsupported_parameter"
+    ACCESS_DENIED = "access_denied"
 
 
 class StageIssue(BaseModel):
@@ -108,18 +112,48 @@ _PLACEHOLDER_RE = re.compile(
     re.IGNORECASE,
 )
 _TOOL_NOT_FOUND_RE = re.compile(
-    r"is not recognized as an? "
+    r"is not recognized as (?:an?|the) "
     r"|command not found"
     r"|not found in PATH"
     r"|cannot be loaded because running scripts is disabled"
-    r"|'(\w+)' is not recognized",
+    r"|'[^']+' is not recognized",
     re.IGNORECASE,
 )
 _TIMEOUT_RE = re.compile(r"timed?\s*out|deadline exceeded", re.IGNORECASE)
+_ERROR_MARKER_RE = re.compile(
+    r"^\s*(?:ERROR|ERR|FAILED?|EXCEPTION)\s*:"
+    r"|^\s*(?:ERROR|ERR|FAILED?|EXCEPTION)\b"
+    r"|\bfailed\b"
+    r"|\bfailure\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+_TYPE_NOT_FOUND_RE = re.compile(
+    r"Unable to find type \[[^\]]+\]"
+    r"|Cannot find type \[[^\]]+\]"
+    r"|type \[[^\]]+\] was not found",
+    re.IGNORECASE,
+)
+_UNSUPPORTED_PARAMETER_RE = re.compile(
+    r"A parameter cannot be found"
+    r"|Cannot find a parameter"
+    r"|ParameterBindingException"
+    r"|AmbiguousParameterSet",
+    re.IGNORECASE,
+)
+_ACCESS_DENIED_RE = re.compile(
+    r"access\s+(?:is\s+)?denied"
+    r"|permission\s+denied"
+    r"|unauthori[sz]ed"
+    r"|privilege\s+not\s+held",
+    re.IGNORECASE,
+)
 _PSH_PARSE_RE = re.compile(
     r"Missing argument in parameter list"
     r"|Missing expression after"
     r"|unexpected token"
+    r"|ParserError"
+    r"|Variable reference is not valid"
+    r"|InvalidVariableReferenceWithDrive"
     r"|FullyQualifiedErrorId\s*:\s*MissingArgument",
     re.IGNORECASE,
 )
@@ -281,69 +315,123 @@ def detect_issues(
     stage_id_map = stage_id_map or {}
     issues: list[StageIssue] = []
 
+    def add_issue(
+        *,
+        ability: AbilityResult,
+        stage: StageExecution,
+        stage_id: str,
+        kind: IssueKind,
+        detail: str,
+    ) -> None:
+        issue = StageIssue(
+            ability_id=ability.ability_id,
+            ability_name=ability.name,
+            stage_id=stage_id,
+            stage_name=stage.stage_name,
+            kind=kind,
+            detail=detail,
+        )
+        if issue not in issues:
+            issues.append(issue)
+
     for ab in result.abilities:
         ab_stages = stage_id_map.get(ab.name, {})
         for stage in ab.stages:
             sid = ab_stages.get(stage.stage_name, ab.ability_id)
+            stage_has_parse_error = False
 
             # Placeholder tokens in the command itself
             placeholders = _PLACEHOLDER_RE.findall(stage.command_executed)
             if placeholders:
-                issues.append(StageIssue(
-                    ability_id=ab.ability_id,
-                    ability_name=ab.name,
+                add_issue(
+                    ability=ab,
+                    stage=stage,
                     stage_id=sid,
-                    stage_name=stage.stage_name,
                     kind=IssueKind.PLACEHOLDER_TOKEN,
                     detail=f"unresolved tokens: {', '.join(placeholders)}",
-                ))
+                )
 
-            # Tool / command not found in stderr
-            if _TOOL_NOT_FOUND_RE.search(stage.stderr):
-                issues.append(StageIssue(
-                    ability_id=ab.ability_id,
-                    ability_name=ab.name,
+            # Tool / command not found. PowerShell try/catch wrappers often emit
+            # these messages to stdout while still returning exit_code=0.
+            combined_output = "\n".join(part for part in (stage.stdout, stage.stderr) if part)
+            if _TOOL_NOT_FOUND_RE.search(combined_output):
+                add_issue(
+                    ability=ab,
+                    stage=stage,
                     stage_id=sid,
-                    stage_name=stage.stage_name,
                     kind=IssueKind.TOOL_NOT_FOUND,
-                    detail=f"stderr: {stage.stderr[:200]}",
-                ))
+                    detail=f"output: {combined_output[:200]}",
+                )
+
+            if _TYPE_NOT_FOUND_RE.search(combined_output):
+                add_issue(
+                    ability=ab,
+                    stage=stage,
+                    stage_id=sid,
+                    kind=IssueKind.TYPE_NOT_FOUND,
+                    detail=f"output: {combined_output[:200]}",
+                )
+
+            if _UNSUPPORTED_PARAMETER_RE.search(combined_output):
+                add_issue(
+                    ability=ab,
+                    stage=stage,
+                    stage_id=sid,
+                    kind=IssueKind.UNSUPPORTED_PARAMETER,
+                    detail=f"output: {combined_output[:200]}",
+                )
+
+            if _ACCESS_DENIED_RE.search(combined_output):
+                add_issue(
+                    ability=ab,
+                    stage=stage,
+                    stage_id=sid,
+                    kind=IssueKind.ACCESS_DENIED,
+                    detail=f"output: {combined_output[:200]}",
+                )
+
+            if _ERROR_MARKER_RE.search(combined_output):
+                add_issue(
+                    ability=ab,
+                    stage=stage,
+                    stage_id=sid,
+                    kind=IssueKind.ERROR_MARKER,
+                    detail=f"output: {combined_output[:200]}",
+                )
 
             # Timeout (exit_code == -1 or explicit message)
             if stage.exit_code == -1 or _TIMEOUT_RE.search(stage.stderr):
-                issues.append(StageIssue(
-                    ability_id=ab.ability_id,
-                    ability_name=ab.name,
+                add_issue(
+                    ability=ab,
+                    stage=stage,
                     stage_id=sid,
-                    stage_name=stage.stage_name,
                     kind=IssueKind.TIMEOUT,
                     detail="exit_code=-1" if stage.exit_code == -1
                            else f"stderr: {stage.stderr[:200]}",
-                ))
+                )
 
             # PowerShell parse error (commas treated as arg separators, etc.)
             if stage.exit_code != 0 and _PSH_PARSE_RE.search(stage.stderr):
-                issues.append(StageIssue(
-                    ability_id=ab.ability_id,
-                    ability_name=ab.name,
+                stage_has_parse_error = True
+                add_issue(
+                    ability=ab,
+                    stage=stage,
                     stage_id=sid,
-                    stage_name=stage.stage_name,
                     kind=IssueKind.PSH_PARSE_ERROR,
                     detail=f"stderr: {stage.stderr[:200]}",
-                ))
+                )
 
             # Cross-ability variable leak (likely empty at runtime)
-            if stage.exit_code != 0:
+            if stage.exit_code != 0 and not stage_has_parse_error:
                 var_refs = _CROSS_VAR_RE.findall(stage.command_executed)
                 if var_refs:
-                    issues.append(StageIssue(
-                        ability_id=ab.ability_id,
-                        ability_name=ab.name,
+                    add_issue(
+                        ability=ab,
+                        stage=stage,
                         stage_id=sid,
-                        stage_name=stage.stage_name,
                         kind=IssueKind.CROSS_VAR_LEAK,
                         detail=f"likely empty vars: {', '.join(var_refs)}",
-                    ))
+                    )
 
     return issues
 
@@ -357,9 +445,11 @@ def derive_phase_done(
     The phase is done when:
       1. The operation didn't fail at the infrastructure level.
       2. At least one ability passed.
-      3. No critical issues (placeholder tokens, tool-not-found, parse errors).
-      4. A majority of abilities passed — a single passing ability amid
-         mostly-failed ones is not enough to call the phase complete.
+        3. No detected issues. An exit code of 0 can still carry stdout/stderr
+            failures from shell wrappers, missing types, unsupported parameters,
+            or access denials.
+        4. Every ability passed. Backend operation status alone is not enough;
+            a completed operation can still contain failed ability stages.
     """
     total = len(op_result.abilities)
     if total == 0:
@@ -372,16 +462,10 @@ def derive_phase_done(
     if passed_count == 0:
         return False
 
-    critical_kinds = {
-        IssueKind.PLACEHOLDER_TOKEN,
-        IssueKind.TOOL_NOT_FOUND,
-        IssueKind.PSH_PARSE_ERROR,
-    }
-    critical_issues = [i for i in issues if i.kind in critical_kinds]
-    if critical_issues:
+    if passed_count != total:
         return False
 
-    if total > 1 and passed_count < (total / 2):
+    if issues:
         return False
 
     return True

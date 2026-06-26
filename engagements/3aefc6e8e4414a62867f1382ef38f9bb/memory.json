@@ -1,0 +1,45 @@
+{
+  "run_id": "3aefc6e8e4414a62867f1382ef38f9bb",
+  "updated_at": "2026-06-26T05:41:02.684072+00:00",
+  "label": "push/discovery/pending",
+  "campaign_progress": {
+    "current_phase": "discovery",
+    "completed_phases": [],
+    "available_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 1,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Identify the local network structure, active hosts, and determine if an Active Directory environment is present.",
+        "outcome": "failed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [],
+        "ability_names": [],
+        "execution_outcome": null,
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {}
+}

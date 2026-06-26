@@ -8,6 +8,8 @@ without standing up the whole LangGraph runtime.
 
 from __future__ import annotations
 
+import json
+
 import bas.orchestrator.graph as graph_mod
 from bas.orchestrator.graph import _make_analyse_results_node
 from bas.orchestrator.memory import (
@@ -203,3 +205,261 @@ def test_analyse_results_timeout_path_clears_pending(monkeypatch):
     assert out["memory"]["network"] == {"cidr": "10.0.0.0/24"}
     # the log line that previously raised NameError now reports the count
     assert any("cleared 2 pending keys" in line for line in out["log"])
+
+
+def test_analyse_results_persists_execution_outcome_after_result(monkeypatch):
+    persisted: list[tuple[dict, dict, str]] = []
+
+    monkeypatch.setattr(
+        graph_mod,
+        "interrupt",
+        lambda _: {
+            "operation_id": "op-partial-success",
+            "name": "credaccess-op",
+            "status": "completed",
+            "execution_logs": [
+                {
+                    "ability_id": "ab-ticket-cache",
+                    "stage_id": "st-ticket-cache",
+                    "command_executed": "klist",
+                    "stdout": "Cached Tickets: (5)",
+                    "stderr": "",
+                    "exit_code": 0,
+                    "executor": "powershell",
+                },
+                {
+                    "ability_id": "ab-kerberoast",
+                    "stage_id": "st-kerberoast",
+                    "command_executed": 'Write-Output "Failed for $spn: $_"',
+                    "stdout": "",
+                    "stderr": (
+                        "Variable reference is not valid. ':' was not followed by "
+                        "a valid variable name character.\n"
+                        "FullyQualifiedErrorId : InvalidVariableReferenceWithDrive"
+                    ),
+                    "exit_code": 1,
+                    "executor": "powershell",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        graph_mod,
+        "persist_memory",
+        lambda state, memory, label: persisted.append((state, memory, label)),
+    )
+
+    class Master:
+        def analyse_results(self, **_kwargs):
+            return graph_mod.MemoryUpdate(facts={}, narrative="analysed")
+
+    node = _make_analyse_results_node(master=Master())
+    state = {
+        "current_phase": "credaccess",
+        "results_dir": "engagements/test/results",
+        "memory": {},
+        "completed_phases": ["discovery"],
+        "phase_history": [
+            {
+                "phase": "credaccess",
+                "objective": "collect credentials",
+                "outcome": "committed",
+            }
+        ],
+        "log": [],
+    }
+
+    out = node(state)
+
+    assert out["retry_same_phase"] is True
+    assert out["completed_phases"] == ["discovery"]
+    execution_outcome = out["phase_history"][-1]["execution_outcome"]
+    assert execution_outcome["operation_id"] == "op-partial-success"
+    assert execution_outcome["abilities_passed"] == 1
+    assert execution_outcome["abilities_failed"] == 1
+    assert execution_outcome["issues_detected"] == ["psh_parse_error"]
+    assert execution_outcome["retry_feedback"][0]["kind"] == "psh_parse_error"
+    assert out["retry_feedback"][0]["command"] == 'Write-Output "Failed for $spn: $_"'
+    assert {
+        "operation_id": "op-partial-success",
+        "abilities_passed": 1,
+        "abilities_failed": 1,
+        "issues_detected": ["psh_parse_error"],
+    }.items() <= execution_outcome.items()
+    assert persisted
+    persisted_state = persisted[-1][0]
+    assert persisted_state["phase_history"][-1]["execution_outcome"] == out["phase_history"][-1]["execution_outcome"]
+    assert persisted_state["completed_phases"] == ["discovery"]
+
+
+def test_analyse_results_exit_zero_error_marker_retries(monkeypatch):
+    monkeypatch.setattr(
+        graph_mod,
+        "interrupt",
+        lambda _: {
+            "operation_id": "op-error-marker",
+            "name": "ad-enum-op",
+            "status": "completed",
+            "execution_logs": [
+                {
+                    "ability_id": "ab-ad-enum",
+                    "stage_id": "st-ad-enum",
+                    "command_executed": "powershell ad enum",
+                    "stdout": "Users failed: Unable to find type [DirectorySearcher].\n",
+                    "stderr": "",
+                    "exit_code": 0,
+                    "executor": "powershell",
+                },
+            ],
+        },
+    )
+
+    class Master:
+        def analyse_results(self, **_kwargs):
+            return graph_mod.MemoryUpdate(facts={}, narrative="analysed")
+
+    node = _make_analyse_results_node(master=Master())
+    out = node(
+        {
+            "current_phase": "ad-enumeration",
+            "results_dir": None,
+            "memory": {},
+            "completed_phases": ["discovery"],
+            "phase_history": [{"phase": "ad-enumeration", "outcome": "committed"}],
+            "log": [],
+        }
+    )
+
+    assert out["retry_same_phase"] is True
+    assert out["completed_phases"] == ["discovery"]
+    assert "ad-enumeration" not in out["completed_phases"]
+    kinds = {item["kind"] for item in out["retry_feedback"]}
+    assert {"error_marker", "type_not_found"} <= kinds
+
+
+def test_push_memory_is_pending_only(monkeypatch):
+    persisted: list[tuple[dict, dict, str]] = []
+
+    def fake_push_specialist(*_args, **_kwargs):
+        return graph_mod.PushResult(
+            skill="accessing-credentials",
+            success=True,
+            adversary_id="adv-1",
+            ability_ids=["ab-1"],
+            stage_ids=["st-1"],
+            linked_ability_ids=["ab-1"],
+            plan_summary=[
+                {
+                    "name": "Harvest Local Kerberos Tickets",
+                    "mitre_technique_id": "T1558.004",
+                    "stages": [
+                        {"command_template": "klist"},
+                    ],
+                }
+            ],
+        )
+
+    class Master:
+        def update_memory(self, **_kwargs):
+            raise AssertionError("push must not call master.update_memory")
+
+    class SkillTool:
+        def has(self, _name):
+            return False
+
+    monkeypatch.setattr(graph_mod, "push_specialist", fake_push_specialist)
+    monkeypatch.setattr(
+        graph_mod,
+        "persist_memory",
+        lambda state, memory, label: persisted.append((state, memory, label)),
+    )
+
+    node = graph_mod._make_push_node(
+        Master(), SkillTool(), bas=object(), artifacts=None, planner=None
+    )
+    out = node(
+        {
+            "run_id": "run-1",
+            "current_phase": "credaccess",
+            "next_stage": "accessing-credentials",
+            "phase_skills": ["accessing-credentials"],
+            "phase_skill_index": 0,
+            "memory": {"host": {"user": "north\\test"}},
+            "master_briefing": {"phase": "credaccess", "objective": "collect creds"},
+            "current_plan": {
+                "adversary": {"name": "adv"},
+                "abilities": [
+                    {
+                        "ability": {"name": "placeholder", "platform": "windows"},
+                        "stages": [
+                            {"stage_name": "stage", "stage_order": 1, "executor": "powershell", "command_template": "klist"}
+                        ],
+                        "rationale": "test",
+                        "grounding_depth": "skip",
+                        "provider": "test",
+                    }
+                ],
+            },
+            "log": [],
+        }
+    )
+
+    assert out["memory"]["host"] == {"user": "north\\test"}
+    assert "narratives" not in out["memory"]
+    assert out["memory"]["pending.credaccess.Harvest Local Kerberos Tickets"] == "awaiting_results"
+    assert out["completed_stages"] == []
+    assert persisted[-1][2] == "push/credaccess/pending"
+
+
+def test_master_analysis_includes_selected_stage_outputs(monkeypatch):
+    import bas.agents.master as master_mod
+
+    captured_payloads: list[dict] = []
+
+    class FakeResponse:
+        def __init__(self, text):
+            self._text = text
+
+        def strip(self):
+            return self._text.strip()
+
+    class FakeLlm:
+        def chat(self, *_args, **_kwargs):
+            return FakeResponse("Harvest Local Kerberos Tickets")
+
+        def generate_structured(self, msgs, _schema, **_kwargs):
+            payload_text = msgs[-1].content.split("\n\n", 1)[1]
+            captured_payloads.append(json.loads(payload_text))
+            return master_mod.MemoryUpdate(facts={}, narrative="ok")
+
+    monkeypatch.setattr(
+        "bas.tools.master_tools.read_stage_output",
+        lambda *_args, **_kwargs: "STDOUT:\nCached Tickets: (5)",
+    )
+
+    master = master_mod.LLMMasterRouter(FakeLlm())
+    update = master.analyse_results(
+        results_dir="engagements/test/results",
+        operation_id="op-1",
+        structural_summary="[PASS] Harvest Local Kerberos Tickets",
+        current_memory={},
+    )
+
+    assert update.narrative == "ok"
+    assert captured_payloads
+    assert captured_payloads[-1]["selected_ability_outputs"] == {
+        "Harvest Local Kerberos Tickets": "STDOUT:\nCached Tickets: (5)"
+    }
+
+
+def test_init_preserves_kali_sidecar_context():
+    out = graph_mod._init_node(
+        {
+            "run_id": "run-1",
+            "available_phases": ["discovery"],
+            "foothold": {"platform": "windows"},
+            "kali_sidecar": {"enabled": True, "healthy": True},
+        }
+    )
+
+    assert out["kali_sidecar"] == {"enabled": True, "healthy": True}

@@ -1,0 +1,34 @@
+{
+  "ability_id": "28e09e7f-2583-400d-b42e-5d4dd9fb1111",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T07:00:13.506361+00:00",
+  "ability": {
+    "name": "Step 7 \u2014 DC Gate Decision",
+    "description": "Verifies if any responsive targets function as Active Directory Domain Controllers to gate Phase B transition.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "gate"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "AD_Gate_Check",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $dcFound = $false; $dcIp = \"\"; $domainName = \"north.sevenkingdoms.local\"; $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike \"127.*\" }; foreach ($a in $adapters) { if ($a.IPAddress -like \"192.168.187.*\" -or $a.IPAddress -like \"192.168.127.*\") { $dcIp = \"192.168.187.1\" } }; if ($dcIp) { try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$dcIp\"); $dn = $de.Properties[\"defaultNamingContext\"].Value; if ($dn) { $dcFound = $true } } catch {} }; if ($dcFound) { Write-Output \"DC_FOUND: true\"; Write-Output \"BASE_DN: $dn\"; Write-Output \"DC_IP: $dcIp\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\dc_gate.txt",
+      "timeout_seconds": 300,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Aggregates the dynamic status of domain configuration to transition Phase-A network mapping to Phase-B Active Directory enumeration.",
+  "provider": "APT-Planner",
+  "cited_urls": []
+}

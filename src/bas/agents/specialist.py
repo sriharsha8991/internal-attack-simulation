@@ -19,7 +19,8 @@ without an LLM round-trip.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+import re
+from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -39,6 +40,51 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _validate_payload_cwd_usage(plan: "SpecialistPlan", catalog: PayloadCatalog) -> list[str]:
+    """Return validation errors for payload stages that do not use cwd syntax."""
+    errors: list[str] = []
+    search_re = re.compile(
+        r"\b(Get-Command|which|Get-ChildItem)\b|\bwhere(?:\.exe)?\s+|\b-Recurse\b",
+        re.IGNORECASE,
+    )
+    for gen in plan.abilities:
+        for stage in gen.stages:
+            if stage.payload_id is None:
+                continue
+            payload = catalog.by_id(stage.payload_id)
+            if payload is None or not payload.name:
+                continue
+            command = stage.command_template or ""
+            command_lower = command.lower()
+            payload_name = payload.name.strip()
+            payload_lower = payload_name.lower()
+            if payload_lower not in command_lower:
+                errors.append(
+                    f"{gen.ability.name}/{stage.stage_name}: payload_id {stage.payload_id} "
+                    f"requires invoking {payload_name!r} from the current directory"
+                )
+                continue
+            cwd_refs = (
+                f".\\{payload_lower}",
+                f"./{payload_lower}",
+            )
+            hardcoded_payload_path_re = re.compile(
+                r"[a-z]:\\[^\s'\";|]*" + re.escape(payload_lower),
+                re.IGNORECASE,
+            )
+            if not any(ref in command_lower for ref in cwd_refs):
+                errors.append(
+                    f"{gen.ability.name}/{stage.stage_name}: payload {payload_name!r} "
+                    "must be invoked with current-directory syntax such as .\\Tool.exe or ./tool"
+                )
+            if search_re.search(command) or hardcoded_payload_path_re.search(command):
+                errors.append(
+                    f"{gen.ability.name}/{stage.stage_name}: payload {payload_name!r} "
+                    "must not be located via PATH, recursive search, or hardcoded drive paths"
+                )
+    return errors
+
+
 # ----------------------------------------------------------------------------
 # Plan + result shapes
 # ----------------------------------------------------------------------------
@@ -49,6 +95,22 @@ class SpecialistPlan(BaseModel):
 
     adversary: AdversaryCreate
     abilities: list[GeneratedAbility] = Field(min_length=1)
+    route_hint: str | None = Field(
+        default=None,
+        description="Optional recommended next canonical phase after this plan executes.",
+    )
+    blocked_reason: str | None = Field(
+        default=None,
+        description="Set when the planner cannot safely produce an executable plan.",
+    )
+    required_ack: str | None = Field(
+        default=None,
+        description="Human ACK token required before this plan may be pushed.",
+    )
+    risk_level: Literal["low", "moderate", "high", "destructive"] = Field(
+        default="moderate",
+        description="Planner's risk classification for safety gating and audit.",
+    )
 
 
 class PushResult(BaseModel):
@@ -314,8 +376,12 @@ class LLMPlanner:
         )
         user_payload = {
             "foothold": state.get("foothold", {}),
+            "kali_sidecar": state.get("kali_sidecar", {}),
+            "safety": state.get("safety", {}),
             "memory": state.get("memory", {}),
             "completed_stages": state.get("completed_stages", []),
+            "issues_to_fix": state.get("issues_to_fix", []),
+            "retry_feedback": state.get("retry_feedback", []),
             "run_id": state.get("run_id"),
         }
         import json
@@ -362,8 +428,12 @@ class LLMPlanner:
 
             user_payload2 = {
                 "foothold": state.get("foothold", {}),
+                "kali_sidecar": state.get("kali_sidecar", {}),
+                "safety": state.get("safety", {}),
                 "memory": state.get("memory", {}),
                 "completed_stages": state.get("completed_stages", []),
+                "issues_to_fix": state.get("issues_to_fix", []),
+                "retry_feedback": state.get("retry_feedback", []),
                 "run_id": state.get("run_id"),
             }
             fix_parts = [
@@ -450,8 +520,12 @@ class LLMPlanner:
 
         user_payload = {
             "foothold": state.get("foothold", {}),
+            "kali_sidecar": state.get("kali_sidecar", {}),
+            "safety": state.get("safety", {}),
             "memory": state.get("memory", {}),
             "completed_stages": state.get("completed_stages", []),
+            "issues_to_fix": state.get("issues_to_fix", []),
+            "retry_feedback": state.get("retry_feedback", []),
             "run_id": state.get("run_id"),
         }
         user_parts = [
@@ -602,6 +676,16 @@ def push_specialist(
                             stage.stage_name,
                         )
                         stage.payload_id = None
+
+        payload_cwd_errors = _validate_payload_cwd_usage(plan, catalog)
+        if payload_cwd_errors:
+            error_report = "\n".join(f"- {err}" for err in payload_cwd_errors)
+            logger.warning("[push] payload command validation failed:\n%s", error_report)
+            return PushResult(
+                skill=skill_name,
+                success=False,
+                error="payload command validation failed:\n" + error_report,
+            )
 
     # ---- 1b. Shell-native syntax validation (pre-push gate) -----------------
     # Parse every command_template through the real shell parser to catch

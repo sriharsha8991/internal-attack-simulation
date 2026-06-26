@@ -1,0 +1,34 @@
+{
+  "ability_id": "c3b93045-7e5e-418b-a073-2c18f1e589e1",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T06:26:04.552114+00:00",
+  "ability": {
+    "name": "Step 7 \u2014 Domain Controller Decision Gate",
+    "description": "Evaluate findings to confirm if an Active Directory Domain Controller was discovered and output standard routing tokens.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "routing"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "decision_gate",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $hasDC = $false; $dcIp = \"\"; $baseDn = \"\"; $step6Logs = Get-Content \"$d/step6_out.txt\" -ErrorAction SilentlyContinue | Out-String; if ($step6Logs -match \"defaultNamingContext: ([^\\r\\n]+)\") { $hasDC = $true; $baseDn = $Matches[1].Trim(); if ($step6Logs -match \"DC_CANDIDATE: (\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\") { $dcIp = $Matches[1].Trim() } }; if ($hasDC) { Write-Output \"DC_FOUND: true\"; Write-Output \"DC_IP: $dcIp\"; Write-Output \"BASE_DN: $baseDn\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\"; Write-Output \"ERROR: step7_gate $($_.Exception.Message)\" }) | Tee-Object -FilePath $d/dc_gate.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Direct downstream operations toward Active Directory mapping or local privilege escalation depending on domain presence.",
+  "provider": "builtin",
+  "cited_urls": []
+}

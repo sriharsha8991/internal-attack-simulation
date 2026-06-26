@@ -1,0 +1,34 @@
+{
+  "ability_id": "1b9499a4-fcc0-4be4-beec-06b5de0f09ae",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T07:00:11.990637+00:00",
+  "ability": {
+    "name": "Step 5 \u2014 Port and Service Discovery",
+    "description": "Performs localized connection scanning on discovered live hosts targeting active directory and typical administration interfaces.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "ports"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Service_Discovery",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { if (Test-Path \"C:\\Windows\\Temp\\bas\\live_hosts.txt\") { $hosts = Get-Content \"C:\\Windows\\Temp\\bas\\live_hosts.txt\" } else { $hosts = @(\"192.168.187.1\", \"192.168.187.141\", \"192.168.127.22\") }; $hosts | Out-File -FilePath \"C:\\Windows\\Temp\\bas\\nmap_targets.txt\" -Encoding ascii; & nmap -sT -sV -Pn -p 21,22,25,53,80,88,110,135,139,143,389,443,445,587,636,1433,3268,3269,3306,3389,5432,5985,5986,8080,8443,8888 --version-intensity 5 --min-rate 200 --max-retries 2 -oX \"C:\\Windows\\Temp\\bas\\nmap_services.xml\" -iL \"C:\\Windows\\Temp\\bas\\nmap_targets.txt\"; \"Port scan completed\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step5.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Targets verified active IPs via TCP connect scans and banner pulls to find active domain interfaces safely.",
+  "provider": "APT-Planner",
+  "cited_urls": []
+}

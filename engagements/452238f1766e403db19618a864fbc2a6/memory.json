@@ -1,0 +1,70 @@
+{
+  "run_id": "452238f1766e403db19618a864fbc2a6",
+  "updated_at": "2026-06-23T12:11:02.641552+00:00",
+  "label": "analyse/discovery/3d651381",
+  "campaign_progress": {
+    "current_phase": "discovery",
+    "completed_phases": [],
+    "available_phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 1,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Perform initial host and Active Directory discovery from the local foothold CASTELBLACK.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1046",
+          "T1016",
+          "T1518",
+          "T1018",
+          "T1033"
+        ],
+        "ability_names": [
+          "Step 0 \u2014 Machine context check & AV/EDR Enumeration",
+          "Step 1 \u2014 Determine the local network range",
+          "Step 2 \u2014 Confirm nmap is installed",
+          "Step 4 \u2014 Host discovery / live-asset map",
+          "Step 5 \u2014 Service / port enumeration on live hosts",
+          "Step 6 \u2014 Targeted Version & Banner Deepening",
+          "Step 7 \u2014 DC gate"
+        ],
+        "execution_outcome": null,
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {
+    "narratives": [
+      {
+        "phase": "discovery",
+        "ts": "2026-06-23T12:09:57.275699+00:00",
+        "text": "We have committed an initial discovery plan targeting the CASTELBLACK foothold and its local subnet of 192.168.187.0/24. This phase focuses heavily on gathering local machine context, identifying active security controls, mapping out live hosts across the /24 network, and confirming the existence of any active Domain Controllers via lightweight TCP and LDAP/SMB banner querying. The output will establish our baseline network map, populate verified targets for Active Directory enumeration, and dynamically dictate whether we proceed to AD-specific targeting or local privilege escalation."
+      },
+      {
+        "phase": "discovery",
+        "ts": "2026-06-23T12:11:02.639418+00:00",
+        "text": "Initial discovery from CASTELBLACK (192.168.187.141) has successfully completed, identifying a domain-joined Windows Server 2019 instance with Windows Defender real-time protection disabled. Network scanning confirmed an active Active Directory environment for the domain 'north.sevenkingdoms.local'. A domain controller, 'winterfell.north.sevenkingdoms.local' (192.168.187.140), was identified with Kerberos, LDAP, and SMB services active. Another potential target with Kerberos and LDAP enabled was also discovered at 192.168.187.142. Next-phase recommendations point to active directory enumeration."
+      }
+    ]
+  }
+}

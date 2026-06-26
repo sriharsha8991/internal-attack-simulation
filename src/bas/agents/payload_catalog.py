@@ -101,6 +101,16 @@ class PayloadCatalog:
         """Set of payload_id strings, used for push-time validation."""
         return {str(e.payload_id) for e in self.entries if e.payload_id is not None}
 
+    def by_id(self, payload_id: object) -> PayloadMetadata | None:
+        """Return metadata for a payload id, if it exists in this catalog."""
+        pid = str(payload_id or "").strip().lower()
+        if not pid:
+            return None
+        for entry in self.entries:
+            if entry.payload_id and str(entry.payload_id).strip().lower() == pid:
+                return entry
+        return None
+
     # ------------------------------------------------------------------
     # Prompt rendering
     # ------------------------------------------------------------------
@@ -145,14 +155,19 @@ class PayloadCatalog:
             "Recon, setup, and cleanup stages leave `payload_id: null`.\n"
             "2. NEVER invent a payload_id. Copy a UUID verbatim from the table above, "
             "or leave the field null.\n"
-            "3. The on-target agent downloads the binary and substitutes its local path "
-            "automatically. Write `command_template` AS IF the binary is already on PATH — "
-            "do NOT hardcode paths like `C:\\Temp\\foo.exe` and do NOT use placeholders "
-            "like `{payload_path}`. Example: "
-            "`SharpHound.exe -CollectionMethod Default -OutputDirectory %TEMP%`.\n"
+            "3. The on-target agent downloads payload files into the current execution "
+            "directory. When `payload_id` is set, invoke that payload from cwd only: "
+            "Windows binaries use `.\\Payload.exe`, PowerShell scripts use "
+            "`. .\\Payload.ps1; FunctionName ...`, and Linux payloads use `./payload`. "
+            "Do NOT rely on PATH, `Get-Command`, `where`, `which`, recursive drive "
+            "searches, hardcoded payload paths, memory-derived payload paths, or "
+            "placeholders like `{payload_path}`. Example: "
+            "`.\\SharpHound.exe -CollectionMethod Default -OutputDirectory C:\\Windows\\Temp\\bas`.\n"
             "4. If no listed payload matches the stage's intent, prefer a native LOLBin — "
             "do not attach a payload \"just because it's there\".\n"
-            "5. Foothold/payload platform mismatch = do not use (already filtered, "
+            "5. Memory-derived paths are allowed for non-payload artifacts only, such "
+            "as evidence files, dumped hives, target lists, and working directories.\n"
+            "6. Foothold/payload platform mismatch = do not use (already filtered, "
             "but double-check)."
         )
 

@@ -18,8 +18,8 @@ Two LLM-backed entry points:
                       (master_revisions cap = 2: original brief + 1 revise).
 
   update_memory(memory, briefing, plan_summary, commit)
-      Synthesises an updated master memory dict after a successful commit:
-      structured keys for machine consumption + a `narrative` line of prose.
+      Legacy hook for intent-only memory. Confirmed facts are written from
+      analyse_results after target execution evidence is available.
 """
 
 from __future__ import annotations
@@ -34,6 +34,23 @@ from ..llm.base import LLMMessage, LLMProvider
 from .payload_catalog import PayloadCatalog
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_triage_ability_names(text: str) -> list[str]:
+    """Parse the triage model's plain-text ability list."""
+    if not text or text.strip().lower() == "false":
+        return []
+    names: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = line.lstrip("-*").strip()
+        if ". " in line[:4]:
+            line = line.split(". ", 1)[1].strip()
+        if line and line.lower() != "false" and line not in names:
+            names.append(line)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -222,20 +239,22 @@ _MASTER_REVIEW_PROMPT = (
 
 _MEMORY_UPDATE_PROMPT = (
     "ROLE\n"
-    "  Master memory keeper. The planner's plan has been committed. Distil the\n"
-    "  plan's intent and the briefing's objective into a memory delta the next\n"
-    "  phase's planner will read.\n"
+    "  Master memory keeper. The planner's plan has been committed but target\n"
+    "  execution has NOT been analysed yet. Distil only intent, not confirmed\n"
+    "  facts.\n"
     "\n"
     "TASK\n"
-    "  Emit a MemoryUpdate. `facts` carries STRUCTURED keys (e.g. network,\n"
-    "  ad, creds, lateral) with sub-keys. `narrative` is one paragraph in the\n"
-    "  voice of an operator briefing a teammate.\n"
+    "  Emit a MemoryUpdate only for pending intent. `facts` may carry pending.*\n"
+    "  keys, but confirmed network/ad/creds/lateral facts must wait for\n"
+    "  analyse_results. `narrative` must say scheduled/planned, not confirmed.\n"
     "\n"
     "RULES\n"
     "  * Do not invent findings. Only record what the COMMANDS in the plan\n"
     "    would actually produce if executed successfully. If a command was\n"
     "    aspirational (e.g. 'discover live hosts'), record the EXPECTATION\n"
     "    keyed under `pending.<area>` rather than as a confirmed fact.\n"
+    "  * Do not write completed/confirmed/succeeded language before execution\n"
+    "    results have been parsed.\n"
     "  * Merge with existing memory: preserve prior keys unless this phase\n"
     "    explicitly supersedes them.\n"
 )
@@ -256,14 +275,15 @@ _MASTER_ANALYSE_TRIAGE_PROMPT = (
     "  Skip abilities that clearly timed out or had placeholder errors.\n"
     "\n"
     "OUTPUT\n"
-    "  A plain-text list of ability names, one per line. Nothing else.\n"
+    "  A plain-text list of ability names, one per line. Return false only if\n"
+    "  no raw output can help explain success, failure, or retry guidance.\n"
 )
 
 _MASTER_ANALYSE_EXTRACT_PROMPT = (
     "ROLE\n"
     "  Master memory keeper. You are reviewing ACTUAL execution output (stdout\n"
-    "  and stderr) from completed abilities. Your job is to extract confirmed\n"
-    "  facts from the output and record them in structured memory.\n"
+    "  and stderr) plus deterministic issue classifications. Your job is to\n"
+    "  extract confirmed facts and produce precise retry feedback.\n"
     "\n"
     "TASK\n"
     "  Emit a MemoryUpdate. `facts` carries STRUCTURED keys (e.g. network,\n"
@@ -273,12 +293,15 @@ _MASTER_ANALYSE_EXTRACT_PROMPT = (
     "RULES\n"
     "  * Only record facts that are CONFIRMED by output. Do not speculate.\n"
     "  * If exit_code != 0, note failures under `issues.{phase}` rather\n"
-    "    than as confirmed facts.\n"
+    "    than as confirmed facts. If exit_code == 0 but output contains an\n"
+    "    issue marker, also record it under `issues.{phase}`.\n"
     "  * If stdout contains IPs, CIDRs, hostnames, service names, usernames,\n"
     "    or file paths, extract them into structured keys.\n"
     "  * Merge with existing memory: preserve prior keys unless this output\n"
     "    explicitly supersedes them.\n"
     "  * Delete any `pending.*` keys that are now confirmed or contradicted.\n"
+    "  * For retries, include structured issue facts with ability, stage,\n"
+    "    kind, failed command, and a concrete command-level correction.\n"
 )
 
 
@@ -482,17 +505,28 @@ class LLMMasterRouter:
                 ),
             ),
         ]
-        triage = self._llm.generate_text(
+        triage = self._llm.chat(
             triage_msgs, grounding="skip", temperature=self._temperature
-        ).strip().lower()
+        ).strip()
 
-        if triage == "false":
+        selected_abilities = _parse_triage_ability_names(triage)
+        if not selected_abilities:
             return MemoryUpdate(facts={}, narrative="No actionable intel found.")
+
+        selected_outputs: dict[str, str] = {}
+        if results_dir:
+            for ability_name in selected_abilities[:8]:
+                selected_outputs[ability_name] = read_stage_output(
+                    results_dir,
+                    operation_id,
+                    ability_name,
+                )[:6000]
 
         # Step B — extract confirmed facts from output
         extract_payload = {
             "current_memory": current_memory,
             "structural_summary": structural_summary,
+            "selected_ability_outputs": selected_outputs,
         }
         extract_msgs = [
             LLMMessage(role="system", content=_MASTER_ANALYSE_EXTRACT_PROMPT),

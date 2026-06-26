@@ -1,0 +1,24 @@
+{
+  "adversary_id": "c1aa1469-b539-427c-aae7-b94ad8a1abfc",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T12:09:43.572927+00:00",
+  "adversary": {
+    "name": "Phase A Network Discovery Operator",
+    "description": "APT Emulation targeting domain discovery and native network mapping.",
+    "profile": "APT3",
+    "execution_strategy": "Sequential Phase A network scanning and validation",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "452238f1766e403db19618a864fbc2a6"
+  },
+  "linked_ability_ids": [
+    "a903265a-5263-4ac6-9b68-093b164bd96e",
+    "820f5813-d1bb-4d24-ade1-596fd821cdfe",
+    "61870f58-e510-4aed-96f2-5d40da2a9415",
+    "814d2d2b-377b-4ecd-9acb-c59b25be38f3",
+    "939f359b-3a8f-40c1-ad3c-2f5dd3b0173c",
+    "5009ec59-ffc9-4ec0-87db-3d6ad65e3690",
+    "4f6b5d1f-721f-42fc-b2b0-0a77171b6bef"
+  ]
+}

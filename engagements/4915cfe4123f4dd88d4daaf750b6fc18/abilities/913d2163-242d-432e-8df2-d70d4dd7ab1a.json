@@ -1,0 +1,34 @@
+{
+  "ability_id": "913d2163-242d-432e-8df2-d70d4dd7ab1a",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:28:18.142171+00:00",
+  "ability": {
+    "name": "Step 1 - Multi-Adapter CIDR Extraction",
+    "description": "Iterates over active network adapters and extracts valid subnet scopes to save network ranges dynamically.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1016",
+    "platform": "windows",
+    "impact_type": "read-only",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "subnet-extraction"
+    ],
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "stages": [
+    {
+      "stage_name": "Adapter Scan",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $adapters=Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 }; $cidrs=@(); foreach($a in $adapters){ $b=([System.Net.IPAddress]$a.IPAddress).GetAddressBytes(); $mk=[System.BitConverter]::GetBytes([uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$a.PrefixLength))); if([BitConverter]::IsLittleEndian){[Array]::Reverse($mk)}; $net=(0..3|ForEach-Object{$b[$_]-band $mk[$_]}) -join '.'; $cidrs+=\"$net/$($a.PrefixLength)\" }; $cidrs | Out-File C:\\Windows\\Temp\\bas\\network_cidrs.txt -Encoding ascii; if($cidrs.Count -gt 0){ $cidrs[0] | Out-File C:\\Windows\\Temp\\bas\\network_cidr.txt -Encoding ascii }; Write-Output \"network.cidrs: $($cidrs | ConvertTo-Json -Compress)\"; if($cidrs.Count -gt 0){ Write-Output \"network.cidr: $($cidrs[0])\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step1.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Generates valid files on target system for multi-subnet sweeps, strictly preventing static variable hardcoding.",
+  "provider": "Lead Red Team Planner",
+  "cited_urls": []
+}

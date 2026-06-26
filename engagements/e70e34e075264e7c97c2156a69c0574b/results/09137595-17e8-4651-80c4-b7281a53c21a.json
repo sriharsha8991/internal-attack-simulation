@@ -1,0 +1,48 @@
+{
+  "operation_id": "09137595-17e8-4651-80c4-b7281a53c21a",
+  "engagement_id": "e70e34e0-7526-4e7c-97c2-156a69c0574b",
+  "name": "Auto Test - APT Privilege State Verifier",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "5f314f1b-9edb-45ea-8e3a-bc027462abef",
+    "engagement_id": "e70e34e0-7526-4e7c-97c2-156a69c0574b",
+    "name": "APT Privilege State Verifier",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 1,
+    "completed_abilities": 1,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-25T12:59:28.730336",
+  "completed_at": "2026-06-25T12:59:39.110863",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "a0b42e15-c596-49cb-8590-63842269b618",
+      "stage_id": "60f96de1-c37d-4433-85c7-b3c75035be8d",
+      "command_executed": "$($error.Clear(); try { whoami /all; whoami /groups } catch { Write-Output \"ERROR: $_\" })",
+      "stdout": "\nUSER INFORMATION\n----------------\n\nUser Name  SID                                           \n========== ==============================================\nnorth\\test S-1-5-21-1001219898-3397012194-2462155686-1124\n\n\nGROUP INFORMATION\n-----------------\n\nGroup Name                                 Type             SID          Attributes                                                     \n========================================== ================ ============ ===============================================================\nEveryone                                   Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group             \nBUILTIN\\Administrators                     Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group, Group owner\nBUILTIN\\Users                              Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\INTERACTIVE                   Well-known group S-1-5-4      Mandatory group, Enabled by default, Enabled group             \nCONSOLE LOGON                              Well-known group S-1-2-1      Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\Authenticated Users           Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\This Organization             Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group             \nLOCAL                                      Well-known group S-1-2-0      Mandatory group, Enabled by default, Enabled group             \nAuthentication authority asserted identity Well-known group S-1-18-1     Mandatory group, Enabled by default, Enabled group             \nMandatory Label\\High Mandatory Level       Label            S-1-16-12288                                                                \n\n\nPRIVILEGES INFORMATION\n----------------------\n\nPrivilege Name                            Description                                                        State   \n========================================= ================================================================== ========\nSeIncreaseQuotaPrivilege                  Adjust memory quotas for a process                                 Disabled\nSeSecurityPrivilege                       Manage auditing and security log                                   Disabled\nSeTakeOwnershipPrivilege                  Take ownership of files or other objects                           Disabled\nSeLoadDriverPrivilege                     Load and unload device drivers                                     Disabled\nSeSystemProfilePrivilege                  Profile system performance                                         Disabled\nSeSystemtimePrivilege                     Change the system time                                             Disabled\nSeProfileSingleProcessPrivilege           Profile single process                                             Disabled\nSeIncreaseBasePriorityPrivilege           Increase scheduling priority                                       Disabled\nSeCreatePagefilePrivilege                 Create a pagefile                                                  Disabled\nSeBackupPrivilege                         Back up files and directories                                      Disabled\nSeRestorePrivilege                        Restore files and directories                                      Disabled\nSeShutdownPrivilege                       Shut down the system                                               Disabled\nSeDebugPrivilege                          Debug programs                                                     Enabled \nSeSystemEnvironmentPrivilege              Modify firmware environment values                                 Disabled\nSeChangeNotifyPrivilege                   Bypass traverse checking                                           Enabled \nSeRemoteShutdownPrivilege                 Force shutdown from a remote system                                Disabled\nSeUndockPrivilege                         Remove computer from docking station                               Disabled\nSeManageVolumePrivilege                   Perform volume maintenance tasks                                   Disabled\nSeImpersonatePrivilege                    Impersonate a client after authentication                          Enabled \nSeCreateGlobalPrivilege                   Create global objects                                              Enabled \nSeIncreaseWorkingSetPrivilege             Increase a process working set                                     Disabled\nSeTimeZonePrivilege                       Change the time zone                                               Disabled\nSeCreateSymbolicLinkPrivilege             Create symbolic links                                              Disabled\nSeDelegateSessionUserImpersonatePrivilege Obtain an impersonation token for another user in the same session Disabled\n\n\nUSER CLAIMS INFORMATION\n-----------------------\n\nUser claims unknown.\n\nKerberos support for Dynamic Access Control on this device has been disabled.\n\nGROUP INFORMATION\n-----------------\n\nGroup Name                                 Type             SID          Attributes                                                     \n========================================== ================ ============ ===============================================================\nEveryone                                   Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group             \nBUILTIN\\Administrators                     Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group, Group owner\nBUILTIN\\Users                              Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\INTERACTIVE                   Well-known group S-1-5-4      Mandatory group, Enabled by default, Enabled group             \nCONSOLE LOGON                              Well-known group S-1-2-1      Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\Authenticated Users           Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\This Organization             Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group             \nLOCAL                                      Well-known group S-1-2-0      Mandatory group, Enabled by default, Enabled group             \nAuthentication authority asserted identity Well-known group S-1-18-1     Mandatory group, Enabled by default, Enabled group             \nMandatory Label\\High Mandatory Level       Label            S-1-16-12288                                                                \n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-25T12:59:33.651182"
+    }
+  ]
+}

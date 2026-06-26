@@ -1,0 +1,104 @@
+{
+  "run_id": "4915cfe4123f4dd88d4daaf750b6fc18",
+  "updated_at": "2026-06-24T17:22:24.272461+00:00",
+  "label": "analyse/timeout/discovery",
+  "campaign_progress": {
+    "current_phase": "discovery",
+    "completed_phases": [],
+    "available_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 2,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Identify active hosts, network services, and potential Active Directory infrastructure within the local subnet.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1018",
+          "T1046",
+          "T1033",
+          "T1016",
+          "T1518"
+        ],
+        "ability_names": [
+          "Step 0 - Machine Context Check (Windows)",
+          "Step 1 - Multi-Adapter CIDR Extraction",
+          "Step 2 - Verify Nmap Availability",
+          "Step 4 - Multi-Subnet Host Discovery",
+          "Step 5 - Targeted Service Port Verification",
+          "Step 7 - Active Directory Gating Check"
+        ],
+        "execution_outcome": {
+          "operation_id": "55876f54-4d36-4f68-918b-cea156b62d61",
+          "abilities_passed": 5,
+          "abilities_failed": 1,
+          "issues_detected": [
+            "psh_parse_error",
+            "cross_var_leak"
+          ]
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "discovery",
+        "objective": "Identify active hosts and Active Directory infrastructure across the discovered subnets 192.168.187.0/24 and 192.168.127.0/24 using the available Nmap tool.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1018",
+          "T1046",
+          "T1033",
+          "T1016",
+          "T1518"
+        ],
+        "ability_names": [
+          "Step 0 - Machine Context Check (Windows)",
+          "Step 1 - Multi-Adapter CIDR Extraction",
+          "Step 2 - Verify Nmap Availability",
+          "Step 4 - Multi-Subnet Host Discovery",
+          "Step 5 - Targeted Service Port Verification & services.json Generation",
+          "Step 7 - Active Directory CS Gate Pivot"
+        ],
+        "execution_outcome": null,
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {
+    "narratives": [
+      {
+        "phase": "discovery",
+        "ts": "2026-06-24T13:04:13.300727+00:00",
+        "text": "Initial discovery on CASTELBLACK confirmed it is a Windows Server 2019 host joined to the 'north.sevenkingdoms.local' domain, configured with two network adapters (192.168.187.141 on 192.168.187.0/24 and 192.168.127.22 on 192.168.127.0/24). Local Nmap version 7.80 is available, but a PowerShell syntax error occurred during one of the sweep executions. No active Domain Controller was found in this phase, prompting a recommendation to focus on local privilege escalation on CASTELBLACK."
+      },
+      {
+        "phase": "discovery",
+        "ts": "2026-06-24T13:28:40.122210+00:00",
+        "text": "We are executing a revised discovery sweep from CASTELBLACK to map the 192.168.187.0/24 and 192.168.127.0/24 subnets after fixing a prior PowerShell syntax failure. The plan initiates an EDR and privilege audit on our current host, validates local Nmap availability, and performs a multi-subnet ping sweep. Following host discovery, a targeted port-level service scan will populate our target matrix and feed into an AD domain controller gate check, establishing whether we pivot to active directory targeting or stick to local privilege escalation."
+      }
+    ]
+  }
+}

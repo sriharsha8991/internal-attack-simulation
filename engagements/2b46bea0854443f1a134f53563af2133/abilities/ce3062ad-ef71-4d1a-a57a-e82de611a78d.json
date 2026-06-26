@@ -1,0 +1,34 @@
+{
+  "ability_id": "ce3062ad-ef71-4d1a-a57a-e82de611a78d",
+  "skill": "escalating-privileges",
+  "saved_at": "2026-06-24T07:25:35.117227+00:00",
+  "ability": {
+    "name": "P0 - Current privilege state check",
+    "description": "Determines current execution integrity and group memberships using native whoami utility.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "p0"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Run P0 whoami checks",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "powershell -ExecutionPolicy Bypass -Command \"$error.Clear(); try { whoami /all; whoami /groups } catch { Write-Host 'ERROR: $_' }\"",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Isolating P0 to determine privilege state without modifying the disk, in accordance with the evaluator directive. This ensures read-only verification before escalating.",
+  "provider": "expert",
+  "cited_urls": []
+}

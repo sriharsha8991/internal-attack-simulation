@@ -24,6 +24,27 @@ from .schemas import EngagementCreateRequest
 
 logger = logging.getLogger(__name__)
 
+
+def _kali_sidecar_context() -> dict[str, Any]:
+    """Return planner-visible Kali sidecar status without making it a BAS agent."""
+    cfg = _state.get("cfg")
+    kali = _state.get("kali")
+    enabled = bool(getattr(getattr(cfg, "kali", None), "enabled", False))
+    base_url = getattr(getattr(cfg, "kali", None), "base_url", None)
+    return {
+        "enabled": enabled,
+        "healthy": bool(kali and kali.is_healthy()),
+        "base_url": base_url,
+        "shared_dir": "/data/kali-shared",
+        "capabilities": [
+            "exec_command",
+            "upload",
+            "download",
+            "parse_keys",
+            "bloodhound_ingest",
+        ],
+    }
+
 # ---------------------------------------------------------------------------
 # Per-engagement lock to prevent concurrent graph invocations on the same
 # thread_id (timeout scanner vs. webhook resume, or multiple results arriving
@@ -501,7 +522,12 @@ def _serialise_state(state: dict[str, Any] | None) -> dict[str, Any] | None:
             for sr in state.get("stage_results", []) or []
         ],
         "memory": state.get("memory", {}),
+        "safety": state.get("safety", {}),
         "foothold": state.get("foothold", {}),
+        "route_hint": state.get("route_hint"),
+        "blocked_reason": state.get("blocked_reason"),
+        "required_ack": state.get("required_ack"),
+        "risk_level": state.get("risk_level"),
         "max_iterations": state.get("max_iterations"),
         "log": list(state.get("log") or []),
     }
@@ -582,6 +608,8 @@ def _run_engagement_inner(engagement_id: str) -> None:
 
         seed = {
             "foothold": foothold,
+            "kali_sidecar": _kali_sidecar_context(),
+            "safety": request.safety.model_dump(mode="json"),
             "available_phases": requested_phases,
             "max_iterations": request.max_iterations,
             "max_master_revisions": 1,

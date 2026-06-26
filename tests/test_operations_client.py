@@ -199,6 +199,124 @@ def test_adapt_operation_detail_builds_stages_from_logs():
     assert stages[0].stdout == "root\n"
 
 
+def test_detect_issues_flags_tool_not_found_in_stdout():
+    from bas.results import IssueKind, detect_issues, parse_operation_result
+
+    detail = {
+        "operation_id": "op-stdout-tool-missing",
+        "name": "ad-enum-op",
+        "status": "completed",
+        "execution_logs": [
+            {
+                "ability_id": "ab-certify",
+                "stage_id": "st-certify",
+                "command_executed": ".\\Certify.exe find /vulnerable",
+                "stdout": "ERROR: The term 'Certify.exe' is not recognized as the name of a cmdlet, function, script file, or operable program.\n",
+                "stderr": "",
+                "exit_code": 0,
+                "executor": "powershell",
+            },
+        ],
+    }
+
+    result = parse_operation_result(detail)
+    issues = detect_issues(result)
+
+    assert any(issue.kind == IssueKind.TOOL_NOT_FOUND for issue in issues)
+
+
+def test_detect_issues_flags_powershell_variable_reference_parse_error():
+    from bas.results import IssueKind, detect_issues, parse_operation_result
+
+    detail = {
+        "operation_id": "op-psh-parse",
+        "name": "credaccess-op",
+        "status": "completed",
+        "execution_logs": [
+            {
+                "ability_id": "ab-kerberoast",
+                "stage_id": "st-kerberoast",
+                "command_executed": 'Write-Output "Failed for $spn: $_"',
+                "stdout": "",
+                "stderr": (
+                    "Variable reference is not valid. ':' was not followed by "
+                    "a valid variable name character.\n"
+                    "FullyQualifiedErrorId : InvalidVariableReferenceWithDrive"
+                ),
+                "exit_code": 1,
+                "executor": "powershell",
+            },
+        ],
+    }
+
+    result = parse_operation_result(detail)
+    issues = detect_issues(result)
+
+    assert any(issue.kind == IssueKind.PSH_PARSE_ERROR for issue in issues)
+
+
+def test_derive_phase_done_requires_every_ability_to_pass():
+    from bas.results import derive_phase_done, parse_operation_result
+
+    detail = {
+        "operation_id": "op-partial-success",
+        "name": "credaccess-op",
+        "status": "completed",
+        "execution_logs": [
+            {
+                "ability_id": "ab-ticket-cache",
+                "stage_id": "st-ticket-cache",
+                "command_executed": "klist",
+                "stdout": "Cached Tickets: (5)",
+                "stderr": "",
+                "exit_code": 0,
+                "executor": "powershell",
+            },
+            {
+                "ability_id": "ab-kerberoast",
+                "stage_id": "st-kerberoast",
+                "command_executed": "kerberoast",
+                "stdout": "",
+                "stderr": "runtime failure",
+                "exit_code": 1,
+                "executor": "powershell",
+            },
+        ],
+    }
+
+    result = parse_operation_result(detail)
+
+    assert derive_phase_done(result, []) is False
+
+
+def test_exit_zero_stdout_error_marker_blocks_phase_done():
+    from bas.results import IssueKind, derive_phase_done, detect_issues, parse_operation_result
+
+    detail = {
+        "operation_id": "op-error-marker",
+        "name": "ad-enum-op",
+        "status": "completed",
+        "execution_logs": [
+            {
+                "ability_id": "ab-ad-enum",
+                "stage_id": "st-ad-enum",
+                "command_executed": "powershell ad enum",
+                "stdout": "Domain: north.sevenkingdoms.local\nUsers failed: Unable to find type [DirectorySearcher].\n",
+                "stderr": "",
+                "exit_code": 0,
+                "executor": "powershell",
+            },
+        ],
+    }
+
+    result = parse_operation_result(detail)
+    issues = detect_issues(result)
+
+    assert any(issue.kind == IssueKind.ERROR_MARKER for issue in issues)
+    assert any(issue.kind == IssueKind.TYPE_NOT_FOUND for issue in issues)
+    assert derive_phase_done(result, issues) is False
+
+
 # ---- poller result persistence --------------------------------------------
 
 

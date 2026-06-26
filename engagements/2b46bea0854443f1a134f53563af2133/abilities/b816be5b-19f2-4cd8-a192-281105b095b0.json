@@ -1,0 +1,34 @@
+{
+  "ability_id": "b816be5b-19f2-4cd8-a192-281105b095b0",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T06:26:00.633458+00:00",
+  "ability": {
+    "name": "Step 2 \u2014 Verify Nmap Availability",
+    "description": "Establish whether the binary 'nmap' is locally accessible to drive faster stealth scanner execution pathing.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1518",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "software-inventory"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "nmap_check",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:/Windows/Temp/bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $nmapPath = Get-Command nmap -ErrorAction SilentlyContinue; if ($nmapPath) { $v = nmap --version 2>&1 | Out-String; Write-Output \"NMAP_AVAILABLE: true\"; Write-Output \"NMAP_VERSION: $v\" } else { Write-Output \"NMAP_AVAILABLE: false\" } } catch { Write-Output \"NMAP_AVAILABLE: false\"; Write-Output \"ERROR: step2_nmap_check $($_.Exception.Message)\" }) | Tee-Object -FilePath $d/nmap_check.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verify Nmap presence dynamically to switch execution paths.",
+  "provider": "builtin",
+  "cited_urls": []
+}

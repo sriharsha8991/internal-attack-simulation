@@ -37,17 +37,23 @@ _BASE_SPECIALIST = (
     "    like SharpHound (discovery) or Rubeus (credentials) exists, it is a MUST-USE tool.\n"
     "  * DECIDE: Choose the safest execution pathway. Prefer native commands or pre-uploaded payloads over\n"
     "    internet downloads (e.g. using `Invoke-WebRequest` to get Mimikatz is loud and high-risk compared to comsvcs mini-dumps).\n"
-    "  * ACT: Build stages. When executing a pre-uploaded binary, you MUST copy its verbatim `payload_id` UUID\n"
-    "    from the available payloads list into the stage's `payload_id` field. Write the `command_template` AS IF\n"
-    "    the binary is already on PATH (the target agent downloads it and substitutes its local path dynamically).\n"
-    "    E.g. stage has `payload_id: \"<verbatim-uuid>\"`, command: `SharpHound.exe -CollectionMethod Default`.\n"
-    "    Recon, setup, or native commands leave `payload_id: null`.\n"
+    "  * ACT: Build stages. When executing a pre-uploaded binary/script, you MUST copy its verbatim `payload_id` UUID\n"
+    "    from the available payloads list into the stage's `payload_id` field. The target agent places payload files\n"
+    "    in the current execution directory; invoke them from there only. Use current-directory syntax such as\n"
+    "    `.\\SharpHound.exe -CollectionMethod Default`, `. .\\Invoke-Mimikatz.ps1; Invoke-Mimikatz ...`, or\n"
+    "    `./linpeas.sh`. Do NOT rely on PATH, `Get-Command`, `where`, `which`, recursive drive searches, hardcoded\n"
+    "    payload paths, or campaign-memory paths for payload files. Campaign memory may guide non-payload targets,\n"
+    "    evidence files, and working directories only. Recon, setup, or native commands leave `payload_id: null`.\n"
     "\n"
     "SELF-RECOVERY & ROBUSTNESS RULES:\n"
     "  1. MANDATORY ERROR TRAPPING: Never execute naked, high-risk system commands or APIs.\n"
     "     Every command template MUST be wrapped in structured error handling so that errors\n"
     "     are intercepted and custom, descriptive error markers are printed. This preserves execution\n"
     "     and lets the analyzer know *exactly* why a step failed instead of timing out or hanging.\n"
+    "     stdout/stderr markers such as ERROR, failed, Unable to find type, unsupported parameter,\n"
+    "     or access denied are treated as execution failures even when exit_code is 0. Emit these\n"
+    "     only for steps that truly need retry; emit OK/FOUND/NONE for successful checks and valid\n"
+    "     empty results.\n"
     "       * PowerShell: Wrap blocks in `$($error.Clear(); try { ... } catch { Write-Output \"ERROR: $_\" }) | Tee-Object ...`\n"
     "       * Linux / Bash: Use `cmd || echo \"ERROR: command failed\"` or conditional execution traps.\n"
     "  2. DETAILED EXECUTOR-AWARE PIPING:\n"
@@ -65,7 +71,16 @@ _BASE_SPECIALIST = (
     "     * Avoid raw `mimikatz` or common binary strings. Use built-in API calls (like `comsvcs.dll` mini-dumps for LSASS) or native LOLBins.\n"
     "  5. ADAPTABILITY ON RE-PLANNING:\n"
     "     * If `EVALUATOR FEEDBACK` or `issues_to_fix` are supplied, you MUST read them as binding corrections.\n"
+    "     * If `retry_feedback` is supplied, repair the exact failed command using each item's kind,\n"
+    "       ability, stage, command, stdout/stderr previews, and exit_code.\n"
     "     * Do not repeat the same blocked syntax or tool command that failed in a previous attempt. Pivot to alternative executors or native commands immediately.\n"
+    "     * Treat `pending.*` memory entries as planned intent only; only analyse_results creates confirmed facts.\n"
+    "\n"
+    "STRUCTURED ROUTING & SAFETY FIELDS:\n"
+    "  * Set `route_hint` when the skill clearly determines the next canonical phase.\n"
+    "  * Set `required_ack` when a plan needs a human ACK token from safety.acks before push.\n"
+    "  * Set `risk_level='destructive'` for DCSync, persistence, BYOVD, ransomware, exfiltration, or destructive simulations.\n"
+    "  * Set `blocked_reason` instead of inventing a plan when required scope or ACK is missing.\n"
 )
 
 _BASE_EVALUATOR = (
@@ -92,7 +107,9 @@ _BASE_EVALUATOR = (
     "\n"
     "PHASE DONE HINT:\n"
     "  * Set `phase_done` to True ONLY when the current plan successfully completes ALL steps required by the phase's `COMPLETION CRITERIA`, taking into account what is already recorded in campaign `memory`.\n"
+    "  * Never infer success from operation status or exit_code alone. Any output marker classified as error_marker, type_not_found, unsupported_parameter, access_denied, tool_not_found, timeout, placeholder_token, cross_var_leak, or psh_parse_error keeps phase_done false.\n"
     "  * If any completion criteria or mandatory steps are missing or failed in a previous attempt (listed in `memory.json` or `push_error`), you must keep `phase_done` as False and enforce a thorough, robust plan.\n"
+    "  * Preserve or set structured `route_hint`, `required_ack`, `blocked_reason`, and `risk_level` when they affect safe routing or push authorization.\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -186,7 +203,9 @@ _DISCOVERY_CRITERIA = (
     "  * Fall back to anonymous bind when authenticated bind fails\n"
     "  * Fall back to netexec when LDAP queries fail\n"
     "  * Write ERROR: lines in output and continue — never abort on single step failure\n"
-    "  These are correct behaviours. DO NOT reject them.\n"
+    "  These are correct behaviours. DO NOT reject them. However, ERROR/failed\n"
+    "  output means the affected step is not complete until a fallback succeeds\n"
+    "  or a valid empty result is emitted as NONE/OK rather than ERROR.\n"
     "\n"
     "ERROR SAFETY RULE:\n"
     "  Every command block must have error handling (try/catch on Windows,\n"
@@ -369,7 +388,11 @@ _DISCOVERY_NOTES = (
     "\n"
     "  * LDAP ENUMERATION APPROACH (all Steps 10-27):\n"
     "    Windows primary: [DirectorySearcher] / [ADSI] — built-in .NET, zero install.\n"
-    "    Windows fallback chain: authenticated bind → anonymous bind → netexec equivalent.\n"
+    "    Windows fallback chain: authenticated bind → [ADSISearcher] alias or explicit New-Object\n"
+    "    System.DirectoryServices.DirectorySearcher → anonymous bind → netexec equivalent.\n"
+    "    If retry_feedback reports type_not_found for [DirectorySearcher], do NOT repeat\n"
+    "    that syntax; pivot to [ADSISearcher], explicit New-Object DirectorySearcher,\n"
+    "    sidecar/Linux ldapsearch when available, or netexec.\n"
     "    Linux primary: ldapsearch — built-in on Kali/Debian.\n"
     "    Linux fallback: anonymous ldapsearch → netexec equivalent.\n"
     "    certipy, daclenum, impacket used ONLY for tasks with no LDAP equivalent.\n"
@@ -383,7 +406,8 @@ _DISCOVERY_NOTES = (
     "\n"
     "  * ERROR HANDLING:\n"
     "    Every LDAP step must have try/catch (Win) or || fallback (Linux).\n"
-    "    Write ERROR: <step> <reason> and continue — never abort Phase B on one failure.\n"
+    "    Write ERROR: <step> <reason> and continue only when all fallbacks for that\n"
+    "    step failed. For valid empty sets, write NONE: <step> rather than failed.\n"
     "\n"
     "  * Password policy (Step 12) MUST be checked before any spray.\n"
     "  * Re-run Step 9 (SharpHound.exe), Step 21, Step 16 on every new machine from lateral movement.\n"
@@ -452,6 +476,40 @@ _CREDACCESS_CRITERIA = (
     "    → achieving-impact (Azure/M365)\n"
     "  ELSE IF no high-priv creds but new hashes obtained:\n"
     "    → moving-laterally (sweep subnet with hashes)"
+)
+
+_AD_ENUMERATION_CRITERIA = (
+    "Phase is DONE when memory contains ALL required AD enumeration keys:\n"
+    "  * `ad.bloodhound_zip`\n"
+    "  * `domain.dcs`\n"
+    "  * `ad.users`\n"
+    "  * `ad.kerberoastable_accounts`\n"
+    "  * `ad.asrep_roastable_accounts`\n"
+    "  * `domain.password_policy`\n"
+    "  * `ad.adcs_vulns`\n"
+    "  * `ad.acl_abuse_paths`\n"
+    "  * `ad.da_sessions`\n"
+    "  * `domain.trusts`\n"
+    "  * `ad.unconstrained_delegation`\n"
+    "  * `domain.dns_records`\n"
+    "  * `ad.gpos`\n"
+    "  * `ad.laps_readable_hosts`\n"
+    "\n"
+    "ORDER ENFORCEMENT:\n"
+    "  * BloodHound collection must run before ACL/delegation analysis.\n"
+    "  * Password policy must be loaded before any spray or password guessing.\n"
+    "  * AD CS checks require a confirmed CA/template source or LDAP template enum.\n"
+    "\n"
+    "TOOLING RULES:\n"
+    "  * Windows primary: [DirectorySearcher] / [ADSI], SharpHound.exe.\n"
+    "  * Linux primary: ldapsearch, bloodhound-python.\n"
+    "  * Third-party tools are fallbacks or task-specific helpers, not mandatory.\n"
+    "\n"
+    "BRANCHING AFTER AD ENUMERATION:\n"
+    "  * ad.adcs_vulns non-empty -> escalating-privileges.\n"
+    "  * Kerberoast/AS-REP candidates -> accessing-credentials.\n"
+    "  * ACL abuse paths -> accessing-credentials.\n"
+    "  * Otherwise -> escalating-privileges."
 )
 _PRIVESC_CRITERIA = (
     "Phase is DONE when memory contains:\n"
@@ -724,6 +782,20 @@ _CREDACCESS_NOTES =  (
     "  * Evidence: lsass_parsed.json, local_hashes.txt, tickets.txt.\n"
 )
 
+_AD_ENUMERATION_NOTES = (
+    "PHASE NOTES — Active Directory enumeration\n"
+    "  * Run only after discovery confirms a DC/domain. Do not route here for\n"
+    "    standalone workgroup hosts.\n"
+    "  * Use concrete memory values: network.dc_ip, domain.base_dn,\n"
+    "    host.domain_name. If absent, discover dynamically without placeholders.\n"
+    "  * Collector rule: SharpHound.exe on Windows; bloodhound-python on Linux.\n"
+    "  * LDAP-first: [DirectorySearcher]/[ADSI] on Windows, ldapsearch on Linux.\n"
+    "  * Every LDAP/network call must trap errors and continue with partial\n"
+    "    evidence rather than aborting the whole phase.\n"
+    "  * Save structured lists even when empty for roastable users, AD CS vulns,\n"
+    "    ACL abuse paths, DA sessions, trusts, delegation, and LAPS.\n"
+)
+
 _PRIVESC_NOTES = (
     "PHASE NOTES — privilege escalation\n"
     "  * ALWAYS run P1 local enumeration first (Seatbelt + WinPEAS +\n"
@@ -776,6 +848,13 @@ def _bootstrap_defaults() -> None:
             phase="discovery",
             specialist_system=_BASE_SPECIALIST + "\n" + _DISCOVERY_NOTES,
             completion_criteria=_DISCOVERY_CRITERIA,
+        )
+    )
+    register_profile(
+        PromptProfile(
+            phase="ad-enumeration",
+            specialist_system=_BASE_SPECIALIST + "\n" + _AD_ENUMERATION_NOTES,
+            completion_criteria=_AD_ENUMERATION_CRITERIA,
         )
     )
     register_profile(

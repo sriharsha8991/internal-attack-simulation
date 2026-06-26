@@ -1,0 +1,34 @@
+{
+  "ability_id": "ae219279-c0bb-48cd-9fd5-be5cf7906232",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:28:20.992196+00:00",
+  "ability": {
+    "name": "Step 7 - Active Directory CS Gate Pivot",
+    "description": "Inspects open service ports and netbios suffixes to output Active Directory state indicators using contract-specified keys.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "read-only",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "ad-gate"
+    ],
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "stages": [
+    {
+      "stage_name": "Gate Computation",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $has_dc=$false; $dc_ip=\"\"; $services_file='C:\\Windows\\Temp\\bas\\services.json'; if(Test-Path $services_file){ $raw_json=Get-Content $services_file -Raw; $svcDict=ConvertFrom-Json $raw_json; foreach($ip in $svcDict.PSObject.Properties.Name){ $ports=$svcDict.$ip; $has_88=$false; $has_389=$false; $has_445=$false; foreach($p in $ports){ if($p.port -eq 88){ $has_88=$true }; if($p.port -eq 389 -or $p.port -eq 636){ $has_389=$true }; if($p.port -eq 445){ $has_445=$true } }; $is_dc_name=$false; try { $name=\"\"; try { $name=[System.Net.Dns]::GetHostEntry($ip).HostName } catch {}; if($name -like '*$'){ $is_dc_name=$true } } catch {}; if(($has_88 -and $has_389) -or ($has_445 -and $is_dc_name)){ $has_dc=$true; $dc_ip=$ip } } }; $domain_joined=$false; try { $domain_joined=(Get-WmiObject Win32_ComputerSystem).PartOfDomain } catch {}; $ad_present=$has_dc -or $domain_joined; $has_dc_str=if($has_dc){\"true\"}else{\"false\"}; $ad_present_str=if($ad_present){\"true\"}else{\"false\"}; Write-Output \"network.has_domain_controller: $has_dc_str\"; Write-Output \"recon.ad_present: $ad_present_str\"; Write-Output \"network.dc_ip: $dc_ip\"; if($has_dc){ Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\dc_gate.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Calculates the DC status and emits correct contract-specified output keys 'network.has_domain_controller' and 'recon.ad_present' using single quotes for '*$' to prevent variable expansion.",
+  "provider": "Lead Red Team Planner",
+  "cited_urls": []
+}

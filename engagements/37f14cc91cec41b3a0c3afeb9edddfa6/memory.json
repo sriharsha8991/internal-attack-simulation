@@ -1,0 +1,71 @@
+{
+  "run_id": "37f14cc91cec41b3a0c3afeb9edddfa6",
+  "updated_at": "2026-06-23T10:09:11.128942+00:00",
+  "label": "analyse/discovery/e37e456f",
+  "campaign_progress": {
+    "current_phase": "discovery",
+    "completed_phases": [],
+    "available_phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 1,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Identify active systems, domain architecture, and potential targets within the authorized network scope.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1046",
+          "T1018",
+          "T1033",
+          "T1016",
+          "T1518"
+        ],
+        "ability_names": [
+          "Step 0 - Machine Context Check",
+          "Step 1 - Register Subnets",
+          "Step 2 - Verify Nmap Presence",
+          "Step 3 - Install Nmap",
+          "Step 4 - Host Discovery Sweep",
+          "Step 5 - Service Scan",
+          "Step 6 - Service Fingerprinting",
+          "Step 7 - Domain Controller Gate"
+        ],
+        "execution_outcome": null,
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {
+    "narratives": [
+      {
+        "phase": "discovery",
+        "ts": "2026-06-23T10:06:07.471368+00:00",
+        "text": "We have established our initial foothold on CASTELBLACK (192.168.187.141) and are launching a comprehensive discovery phase. Our committed plan focuses on local system profiling, dynamic subnet registration, and a multi-tiered host and service sweep using Nmap or native PowerShell fallbacks. We will also perform targeted LDAP and SMB fingerprinting to verify the presence of an Active Directory Domain Controller, which will determine our pivot into AD enumeration or persistence."
+      },
+      {
+        "phase": "discovery",
+        "ts": "2026-06-23T10:09:11.126971+00:00",
+        "text": "analysis failed: AttributeError(\"'GeminiProvider' object has no attribute 'generate_text'\")"
+      }
+    ]
+  }
+}

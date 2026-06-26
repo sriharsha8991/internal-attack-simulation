@@ -1,0 +1,98 @@
+{
+  "operation_id": "3265e992-0129-4673-b4b4-ac3da9408aed",
+  "engagement_id": "14156582-e48b-4be9-a40a-96054a9a891d",
+  "name": "Auto Test - APT-Environment-Explorer",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "1a839e0f-47ca-4a89-bc30-1b9856dc76d7",
+    "engagement_id": "14156582-e48b-4be9-a40a-96054a9a891d",
+    "name": "APT-Environment-Explorer",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 6,
+    "completed_abilities": 6,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-23T16:07:10.655569",
+  "completed_at": "2026-06-23T16:07:55.177067",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "24f989e6-6dff-4573-a7d9-25b7bea544bc",
+      "stage_id": "79a7952f-6721-4693-bbcb-8f10220d4e98",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $id = whoami /all; $cs = Get-WmiObject Win32_ComputerSystem; $dom = $cs.PartOfDomain; $dn = $cs.Domain; $os = (Get-WmiObject Win32_OperatingSystem).Caption; $hn = $env:COMPUTERNAME; Write-Output \"PLATFORM: windows\"; Write-Output \"HOSTNAME: $hn\"; Write-Output \"DOMAIN_JOINED: $dom\"; Write-Output \"DOMAIN: $dn\"; Write-Output \"OS: $os\"; Write-Output \"--- WHOAMI ---\"; $id } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step0.txt",
+      "stdout": "PLATFORM: windows\nHOSTNAME: CASTELBLACK\nDOMAIN_JOINED: True\nDOMAIN: north.sevenkingdoms.local\nOS: Microsoft Windows Server 2019 Datacenter Evaluation\n--- WHOAMI ---\n\nUSER INFORMATION\n----------------\n\nUser Name  SID                                           \n========== ==============================================\nnorth\\test S-1-5-21-1001219898-3397012194-2462155686-1124\n\n\nGROUP INFORMATION\n-----------------\n\nGroup Name                                 Type             SID          Attributes                                                     \n========================================== ================ ============ ===============================================================\nEveryone                                   Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group             \nBUILTIN\\Administrators                     Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group, Group owner\nBUILTIN\\Users                              Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\INTERACTIVE                   Well-known group S-1-5-4      Mandatory group, Enabled by default, Enabled group             \nCONSOLE LOGON                              Well-known group S-1-2-1      Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\Authenticated Users           Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group             \nNT AUTHORITY\\This Organization             Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group             \nLOCAL                                      Well-known group S-1-2-0      Mandatory group, Enabled by default, Enabled group             \nAuthentication authority asserted identity Well-known group S-1-18-1     Mandatory group, Enabled by default, Enabled group             \nMandatory Label\\High Mandatory Level       Label            S-1-16-12288                                                                \n\n\nPRIVILEGES INFORMATION\n----------------------\n\nPrivilege Name                            Description                                                        State   \n========================================= ================================================================== ========\nSeIncreaseQuotaPrivilege                  Adjust memory quotas for a process                                 Disabled\nSeSecurityPrivilege                       Manage auditing and security log                                   Disabled\nSeTakeOwnershipPrivilege                  Take ownership of files or other objects                           Disabled\nSeLoadDriverPrivilege                     Load and unload device drivers                                     Disabled\nSeSystemProfilePrivilege                  Profile system performance                                         Disabled\nSeSystemtimePrivilege                     Change the system time                                             Disabled\nSeProfileSingleProcessPrivilege           Profile single process                                             Disabled\nSeIncreaseBasePriorityPrivilege           Increase scheduling priority                                       Disabled\nSeCreatePagefilePrivilege                 Create a pagefile                                                  Disabled\nSeBackupPrivilege                         Back up files and directories                                      Disabled\nSeRestorePrivilege                        Restore files and directories                                      Disabled\nSeShutdownPrivilege                       Shut down the system                                               Disabled\nSeDebugPrivilege                          Debug programs                                                     Enabled \nSeSystemEnvironmentPrivilege              Modify firmware environment values                                 Disabled\nSeChangeNotifyPrivilege                   Bypass traverse checking                                           Enabled \nSeRemoteShutdownPrivilege                 Force shutdown from a remote system                                Disabled\nSeUndockPrivilege                         Remove computer from docking station                               Disabled\nSeManageVolumePrivilege                   Perform volume maintenance tasks                                   Disabled\nSeImpersonatePrivilege                    Impersonate a client after authentication                          Enabled \nSeCreateGlobalPrivilege                   Create global objects                                              Enabled \nSeIncreaseWorkingSetPrivilege             Increase a process working set                                     Disabled\nSeTimeZonePrivilege                       Change the time zone                                               Disabled\nSeCreateSymbolicLinkPrivilege             Create symbolic links                                              Disabled\nSeDelegateSessionUserImpersonatePrivilege Obtain an impersonation token for another user in the same session Disabled\n\n\nUSER CLAIMS INFORMATION\n-----------------------\n\nUser claims unknown.\n\nKerberos support for Dynamic Access Control on this device has been disabled.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:07:14.781980"
+    },
+    {
+      "ability_id": "f21b9d83-e119-4c6c-b7e9-1599f4466430",
+      "stage_id": "b7249576-dd42-45dc-ba57-f20faa3e5387",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $cidr = '192.168.187.0/24'; Write-Output $cidr | Out-File C:\\Windows\\Temp\\bas\\network_cidr.txt -Encoding ascii; Write-Output \"NETWORK_CIDR: $cidr\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step1.txt",
+      "stdout": "NETWORK_CIDR: 192.168.187.0/24\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:07:20.343849"
+    },
+    {
+      "ability_id": "1631e481-77e2-4b48-98d3-d45ca2cf5646",
+      "stage_id": "97552038-981a-4426-bc55-13b082007f1a",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); nmap --version; Write-Output \"NMAP_AVAILABLE: true\" } catch { Write-Output \"NMAP_AVAILABLE: false\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step2.txt",
+      "stdout": "Nmap version 7.80 ( https://nmap.org )\nPlatform: i686-pc-windows-windows\nCompiled with: nmap-liblua-5.3.5 openssl-1.0.2s nmap-libssh2-1.8.2 nmap-libz-1.2.11 nmap-libpcre-7.6 Npcap-0.9982 nmap-libdnet-1.12 ipv6\nCompiled without:\nAvailable nsock engines: iocp poll select\nNMAP_AVAILABLE: true\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:07:26.066936"
+    },
+    {
+      "ability_id": "1e6864e4-6cae-44bf-9dd0-8e091d940d9e",
+      "stage_id": "9a9a7b14-73a6-4758-a6ce-f172d0cad964",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $hosts = New-Object System.Collections.Generic.List[string]; $prefix = '192.168.187'; foreach ($i in 1..254) { $ip = \"$prefix.$i\"; if (Test-Connection -ComputerName $ip -Count 1 -Quiet -TimeoutMilliSecs 100) { $hosts.Add($ip) } }; if ($hosts.Count -eq 0) { $hosts.Add('192.168.187.141') }; $hosts | Out-File C:\\Windows\\Temp\\bas\\live_hosts.txt -Encoding ascii; $hosts | ConvertTo-Json | Out-File C:\\Windows\\Temp\\bas\\live_hosts.json -Encoding ascii; Write-Output \"LIVE_HOST_COUNT: $($hosts.Count)\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step4.txt",
+      "stdout": "ERROR: A parameter cannot be found that matches parameter name 'TimeoutMilliSecs'.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:07:31.652065"
+    },
+    {
+      "ability_id": "095c7b18-a6fc-4fc9-b98d-bae487fac3dd",
+      "stage_id": "db143917-6153-43bf-944b-8a87209637f0",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $hostsFile = 'C:\\Windows\\Temp\\bas\\live_hosts.txt'; if (!(Test-Path $hostsFile)) { throw 'live_hosts.txt missing' }; $hosts = Get-Content $hostsFile; $ports = @(88,389,445); $results = @(); foreach ($ip in $hosts) { foreach ($port in $ports) { $tcp = New-Object System.Net.Sockets.TcpClient; try { $c = $tcp.BeginConnect($ip, $port, $null, $null); if ($c.AsyncWaitHandle.WaitOne(200, $false)) { $tcp.EndConnect($c); Write-Output \"OPEN: $ip`:$port\"; $results += @{ip=$ip; port=$port; service=$(if($port -eq 88){'kerberos'}elseif($port -eq 389){'ldap'}else{'microsoft-ds'})} } } catch {} finally { $tcp.Dispose() } } }; $results | ConvertTo-Json | Out-File C:\\Windows\\Temp\\bas\\services.json -Encoding ascii } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step5.txt",
+      "stdout": "OPEN: 192.168.187.140:88\nOPEN: 192.168.187.140:389\nOPEN: 192.168.187.140:445\nOPEN: 192.168.187.141:445\nOPEN: 192.168.187.142:88\nOPEN: 192.168.187.142:389\nOPEN: 192.168.187.142:445\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:07:40.371266"
+    },
+    {
+      "ability_id": "d0b5b0a6-883f-40a6-aa15-4d19d0d2d50f",
+      "stage_id": "8733b01b-ed99-4deb-86b4-848e9b7ed2bb",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $de = New-Object System.DirectoryServices.DirectoryEntry('LDAP://192.168.187.141'); $dn = $de.Properties['defaultNamingContext'].Value; if ($dn) { Write-Output \"DC_FOUND: true\"; Write-Output \"BASE_DN: $dn\"; Write-Output \"RECOMMENDED_NEXT: ad-enumeration\"; Write-Output \"PHASE_DONE: false\" } else { Write-Output \"DC_FOUND: false\"; Write-Output \"RECOMMENDED_NEXT: escalating-privileges\"; Write-Output \"PHASE_DONE: true\" } } catch { Write-Output \"DC_FOUND: false\"; Write-Output \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\dc_gate.txt",
+      "stdout": "DC_FOUND: false\nERROR: Cannot index into a null array.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:07:49.552196"
+    }
+  ]
+}

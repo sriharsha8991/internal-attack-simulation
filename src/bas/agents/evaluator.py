@@ -63,6 +63,22 @@ class EvaluatorVerdict(BaseModel):
         ),
     )
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    route_hint: str | None = Field(
+        default=None,
+        description="Optional recommended next canonical phase if the plan is accepted.",
+    )
+    blocked_reason: str | None = Field(
+        default=None,
+        description="Why execution should stop or wait for human input.",
+    )
+    required_ack: str | None = Field(
+        default=None,
+        description="ACK token required before the plan may be pushed.",
+    )
+    risk_level: Literal["low", "moderate", "high", "destructive"] = Field(
+        default="moderate",
+        description="Evaluator's risk classification for audit and safety gates.",
+    )
 
 
 

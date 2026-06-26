@@ -1,0 +1,18 @@
+{
+  "adversary_id": "5fe5e422-9612-4c3d-a167-54a77568b72c",
+  "skill": "enumerating-active-directory",
+  "saved_at": "2026-06-25T06:50:52.249795+00:00",
+  "adversary": {
+    "name": "APT Active Directory Surveyor",
+    "description": "A quiet, highly resilient Active Directory surveyor that maps domain trust, delegation, users, and certificates via native ADSI/LDAP queries with automated payload fallback.",
+    "profile": "AD-ENUM",
+    "execution_strategy": "Executes localized PowerShell ADSI and LDAP queries natively with individual try/catch error traps, dynamically resolving the domain landscape and executing optional tools.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "linked_ability_ids": [
+    "6e189395-41e9-48bf-8984-d160d8fe2c0c"
+  ]
+}

@@ -72,8 +72,9 @@ internal-attack-simulation/
 ├── config/
 │   └── config.yaml         # central configuration (one file controls everything)
 ├── docs/                   # system design + research dossiers
-├── skills/                 # 7 Anthropic-format skill dirs
+├── skills/                 # Anthropic-format skill dirs
 │   ├── discovering-environment/
+│   ├── enumerating-active-directory/
 │   ├── escalating-privileges/
 │   ├── accessing-credentials/
 │   ├── moving-laterally/

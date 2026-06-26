@@ -1,0 +1,34 @@
+{
+  "ability_id": "043ece5d-a197-4d97-8347-5693b872ce9f",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T13:28:18.904917+00:00",
+  "ability": {
+    "name": "Step 2 - Verify Nmap Availability",
+    "description": "Proves Nmap is available on PATH for fast execution during later stages.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1518",
+    "platform": "windows",
+    "impact_type": "read-only",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "tool-verification"
+    ],
+    "created_by": "ai",
+    "engagement_id": "4915cfe4123f4dd88d4daaf750b6fc18"
+  },
+  "stages": [
+    {
+      "stage_name": "Nmap Check",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $v=nmap --version 2>&1 | Select-String \"Nmap\"; if($v){ Write-Output \"NMAP_AVAILABLE: true\"; Write-Output \"recon.nmap_available: true\" } else { Write-Output \"NMAP_AVAILABLE: false\"; Write-Output \"recon.nmap_available: false\" } } catch { Write-Output \"NMAP_AVAILABLE: false\"; Write-Output \"recon.nmap_available: false\" } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step2.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Verifies host availability of Nmap for optimized performance.",
+  "provider": "Lead Red Team Planner",
+  "cited_urls": []
+}

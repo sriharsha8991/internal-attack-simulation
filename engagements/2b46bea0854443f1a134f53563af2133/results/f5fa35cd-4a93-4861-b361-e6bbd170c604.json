@@ -1,0 +1,98 @@
+{
+  "operation_id": "f5fa35cd-4a93-4861-b361-e6bbd170c604",
+  "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+  "name": "Auto Test - APT-AD-Enumeration-Operator",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "20ddf8e4-ec86-4311-bce5-3f0fe2c34ac5",
+    "engagement_id": "2b46bea0-8544-43f1-a134-f53563af2133",
+    "name": "APT-AD-Enumeration-Operator",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 6,
+    "completed_abilities": 6,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-24T15:38:43.861897",
+  "completed_at": "2026-06-24T15:39:21.640451",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "1ab081e1-a2eb-42f6-81c6-f712c281ab3b",
+      "stage_id": "cc83a8ea-f5f3-4c7b-b10b-86567a5ff2ad",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain(); Write-Output \"Domain: $($domain.Name)\"; Write-Output \"DCs: $($domain.DomainControllers)\"; $root = [ADSI]'LDAP://RootDSE'; $dnsZonePath = 'LDAP://CN=MicrosoftDNS,DC=DomainDnsZones,' + $root.defaultNamingContext; if ([System.DirectoryServices.DirectoryEntry]::Exists($dnsZonePath)) { $entry = [ADSI]$dnsZonePath; foreach ($child in $entry.Children) { if ($child.SchemaClassName -eq 'dnsZone') { Write-Output \"DNS Zone: $($child.cn)\" } } } else { Write-Output 'No DomainDnsZones found' } } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\dns_zones.txt",
+      "stdout": "Domain: north.sevenkingdoms.local\nDCs: winterfell.north.sevenkingdoms.local\nERROR: Exception calling \"Exists\" with \"1\" argument(s): \"The specified directory service attribute or value does not exist.\n\"\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T15:38:47.819754"
+    },
+    {
+      "ability_id": "21872ef8-416b-4bbe-8aa6-127568f2cbed",
+      "stage_id": "9fc476d9-71f3-4f37-8c56-c428848b1a7b",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcher = [adsisearcher]'(objectCategory=person)'; $searcher.PageSize = 1000; $users = $searcher.FindAll(); $users | ForEach-Object { $_.Properties.samaccountname } | Out-File -FilePath $d\\users.txt; $domainEntry = [ADSI]''; $maxPwdAge = $domainEntry.Properties.maxpwdage; Write-Output \"Max Password Age: $maxPwdAge\" | Out-File -FilePath $d\\password_policy.txt } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\user_enumeration_out.txt",
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T15:38:53.492216"
+    },
+    {
+      "ability_id": "6705cf4a-cd46-4a47-9f75-402df0ecb332",
+      "stage_id": "02fb254a-c07c-42cb-ab61-7a07fd8fcbea",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcherGPO = [adsisearcher]'(objectCategory=groupPolicyContainer)'; $searcherGPO.FindAll() | ForEach-Object { $_.Properties.displayname } | Out-File -FilePath $d\\gpos.txt; [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().DomainTrusts | Out-File -FilePath $d\\trusts.txt; $searcherDel = [adsisearcher]'(&(objectCategory=computer)(userAccountControl:1.2.840.113556.1.4.803:=524288))'; $searcherDel.FindAll() | ForEach-Object { $_.Properties.dnshostname } | Out-File -FilePath $d\\delegation.txt; $searcherLAPS = [adsisearcher]'(ms-mcs-AdmPwd=*)'; $searcherLAPS.FindAll() | ForEach-Object { $_.Properties.name } | Out-File -FilePath $d\\laps.txt } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\ad_components_out.txt",
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T15:38:59.282475"
+    },
+    {
+      "ability_id": "c0c15857-9a78-4de8-9c87-ffc7acd7edc0",
+      "stage_id": "1e4fde62-a251-4079-ae3a-2e1c0f709259",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { Certify.exe find /vulnerable } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\adcs.txt",
+      "stdout": "ERROR: The term 'Certify.exe' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T15:39:04.826475"
+    },
+    {
+      "ability_id": "38422216-e68e-4f2d-8852-52150f663e6e",
+      "stage_id": "d4ca630e-7215-4053-a868-fc09e7f28b19",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $searcher = [adsisearcher]'(cn=Domain Admins)'; $group = $searcher.FindOne(); if ($group) { foreach ($member in $group.Properties.member) { Write-Output \"DA Member: $member\" } } qwinsta; quser } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\da_sessions.txt",
+      "stdout": "DA Member: CN=ethic,CN=Users,DC=north,DC=sevenkingdoms,DC=local\nDA Member: CN=eddard.stark,CN=Users,DC=north,DC=sevenkingdoms,DC=local\nDA Member: CN=Administrator,CN=Users,DC=north,DC=sevenkingdoms,DC=local\n SESSIONNAME       USERNAME                 ID  STATE   TYPE        DEVICE \n services                                    0  Disc                        \n>console           test                      1  Active                      \n rdp-tcp#0         robb.stark                2  Active                      \n rdp-tcp                                 65536  Listen                      \n USERNAME              SESSIONNAME        ID  STATE   IDLE TIME  LOGON TIME\n>test                  console             1  Active      none   6/23/2026 10:30 PM\n robb.stark            rdp-tcp#0           2  Active       4:47  6/23/2026 10:21 PM\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T15:39:10.670467"
+    },
+    {
+      "ability_id": "4a48a51b-4e05-4f29-b176-853111c9885a",
+      "stage_id": "a2c2d294-49ea-40ff-8bce-b6d6719b155b",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { SharpHound.exe --CollectionMethods Default --OutputDirectory $d } catch { \"ERROR: $_\" }) | Tee-Object -FilePath $d\\sharphound_out.txt",
+      "stdout": "ERROR: The term 'SharpHound.exe' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-24T15:39:16.210029"
+    }
+  ]
+}

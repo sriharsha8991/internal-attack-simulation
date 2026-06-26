@@ -1,0 +1,36 @@
+{
+  "ability_id": "f21b9d83-e119-4c6c-b7e9-1599f4466430",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:06.163178+00:00",
+  "ability": {
+    "name": "Subnet Detection",
+    "description": "Establish the network ranges based on context check metrics.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1016",
+    "platform": "windows",
+    "impact_type": "low",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "network"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "Subnet Detection",
+      "stage_order": 2,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $cidr = '192.168.187.0/24'; Write-Output $cidr | Out-File C:\\Windows\\Temp\\bas\\network_cidr.txt -Encoding ascii; Write-Output \"NETWORK_CIDR: $cidr\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step1.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Determines the primary scope for active sweeps.",
+  "provider": "Lead Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1016/"
+  ]
+}

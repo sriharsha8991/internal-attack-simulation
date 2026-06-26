@@ -24,15 +24,18 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from .bootstrap import _bootstrap, _state
 from .foothold import FootholdResolutionError
 from .persistence import now_iso
 from .routes import engagements_router, results_router
+from .routes.ui_api import ui_router
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +49,21 @@ app = FastAPI(
     description="HTTP trigger surface for the BAS internal-attack orchestrator.",
 )
 
+# Register routes
 app.include_router(engagements_router)
 app.include_router(results_router)
+app.include_router(ui_router)
+
+# Mount static folder for SPA Dashboard
+static_dir = Path(__file__).resolve().parent / "static"
+static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def redirect_to_dashboard():
+    """UX Redirect to the responsive manual skill editor and trigger panel."""
+    return RedirectResponse(url="/static/index.html")
 
 
 # ---------------------------------------------------------------------------

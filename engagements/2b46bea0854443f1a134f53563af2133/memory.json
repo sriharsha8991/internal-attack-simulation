@@ -1,0 +1,326 @@
+{
+  "run_id": "2b46bea0854443f1a134f53563af2133",
+  "updated_at": "2026-06-24T10:19:28.197793+00:00",
+  "label": "analyse/lateral/331c8e8e",
+  "campaign_progress": {
+    "current_phase": "lateral",
+    "completed_phases": [
+      "privesc",
+      "credaccess",
+      "ad-enumeration"
+    ],
+    "available_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "discovery",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 8,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Perform initial local and network discovery from the CASTELBLACK foothold to identify domain structure and live hosts.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1518",
+          "T1018",
+          "T1016",
+          "T1046",
+          "T1033"
+        ],
+        "ability_names": [
+          "Step 0 \u2014 Machine Context Check",
+          "Step 1 \u2014 Determine Local Network Ranges",
+          "Step 2 \u2014 Verify Nmap Availability",
+          "Step 4 \u2014 Host Discovery Sweep (Multi-Adapter)",
+          "Step 5 \u2014 Port and Service Discovery",
+          "Step 6 \u2014 Targeted Service Fingerprinting Deepening",
+          "Step 7 \u2014 Domain Controller Decision Gate"
+        ],
+        "execution_outcome": {
+          "operation_id": "653a8a38-f86e-41e2-b797-d632330acdb2",
+          "abilities_passed": 6,
+          "abilities_failed": 1,
+          "issues_detected": [
+            "psh_parse_error",
+            "cross_var_leak"
+          ]
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "discovery",
+        "objective": "Complete the host discovery sweep and port scanning across the identified 192.168.127.0/24 and 192.168.187.0/24 subnets using Nmap to find the active Domain Controller.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1046",
+          "T1018",
+          "T1016"
+        ],
+        "ability_names": [
+          "Step 1 \u2014 Determine Local Network Ranges",
+          "Step 4 \u2014 Host Discovery Sweep",
+          "Step 5 \u2014 Port and Service Discovery",
+          "Step 6 \u2014 Targeted Service Fingerprinting",
+          "Step 7 \u2014 DC Gate Decision"
+        ],
+        "execution_outcome": {
+          "operation_id": "f82127a9-7503-458b-b1f6-cb6d37fda6d8",
+          "abilities_passed": 4,
+          "abilities_failed": 1,
+          "issues_detected": [
+            "psh_parse_error",
+            "cross_var_leak"
+          ]
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "privesc",
+        "objective": "Identify and exploit local privilege escalation vulnerabilities or misconfigurations on CASTELBLACK to elevate our current session to Administrator or SYSTEM.",
+        "outcome": "committed",
+        "skills_used": [
+          "escalating-privileges"
+        ],
+        "techniques_used": [
+          "T1033"
+        ],
+        "ability_names": [
+          "P0 - Current privilege state check"
+        ],
+        "execution_outcome": {
+          "operation_id": "f7543126-3a78-416a-9fbb-69edf380901e",
+          "abilities_passed": 0,
+          "abilities_failed": 1,
+          "issues_detected": [
+            "cross_var_leak"
+          ]
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "privesc",
+        "objective": "Identify and exploit local privilege escalation vulnerabilities on CASTELBLACK to elevate the current session.",
+        "outcome": "committed",
+        "skills_used": [
+          "escalating-privileges"
+        ],
+        "techniques_used": [
+          "T1033"
+        ],
+        "ability_names": [
+          "P0 \u2014 Current Privilege State Check"
+        ],
+        "execution_outcome": {
+          "operation_id": "138978ea-9770-4133-8f71-966dcd5da4f6",
+          "abilities_passed": 1,
+          "abilities_failed": 0,
+          "issues_detected": []
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "credaccess",
+        "objective": "Access and extract credentials from CASTELBLACK to facilitate further local access or potential lateral movement.",
+        "outcome": "committed",
+        "skills_used": [
+          "accessing-credentials"
+        ],
+        "techniques_used": [
+          "T1555.003",
+          "T1003.001",
+          "T1484.001",
+          "T1558.003",
+          "T1003.002"
+        ],
+        "ability_names": [
+          "SAM/LSA Registry Extraction",
+          "Kerberoasting and AS-REP Roasting",
+          "DPAPI / Browser & Configuration Credential Hunt",
+          "LSASS Dumping and Parsing via Invoke-Mimikatz",
+          "SharpGPOAbuse Verification"
+        ],
+        "execution_outcome": {
+          "operation_id": "4a6ec1ec-4bc3-4c47-a1d5-4b464bf91a46",
+          "abilities_passed": 3,
+          "abilities_failed": 2,
+          "issues_detected": [
+            "psh_parse_error",
+            "cross_var_leak",
+            "psh_parse_error",
+            "cross_var_leak"
+          ]
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "credaccess",
+        "objective": "Access and extract local and domain credentials from CASTELBLACK while resolving PowerShell scripting, parsing, and syntax errors.",
+        "outcome": "committed",
+        "skills_used": [
+          "accessing-credentials"
+        ],
+        "techniques_used": [
+          "T1003.001",
+          "T1484.001",
+          "T1558.003",
+          "T1003.002"
+        ],
+        "ability_names": [
+          "Domain Kerberoasting and AS-REP Roasting Check",
+          "SAM and SYSTEM Registry Hive Extraction",
+          "LSASS Credential Extraction via Invoke-Mimikatz",
+          "SharpGPOAbuse Verification"
+        ],
+        "execution_outcome": {
+          "operation_id": "06581b97-4623-439c-ad85-1ba78759ba2c",
+          "abilities_passed": 4,
+          "abilities_failed": 0,
+          "issues_detected": []
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "ad-enumeration",
+        "objective": "Enumerate Active Directory structure, domain controllers, trusts, and high-privilege targets from the CASTELBLACK foothold.",
+        "outcome": "committed",
+        "skills_used": [
+          "enumerating-active-directory"
+        ],
+        "techniques_used": [
+          "T1049",
+          "T1087.002",
+          "T1018",
+          "T1069.002",
+          "T1615"
+        ],
+        "ability_names": [
+          "Domain Information and DNS Zone Querying",
+          "User and Password Policy Enumeration",
+          "GPO, Trusts, Delegation, and LAPS Enumeration",
+          "AD CS Template and Vulnerability Audit",
+          "Domain Admin Session Mapping",
+          "Active Directory BloodHound Collection"
+        ],
+        "execution_outcome": {
+          "operation_id": "f5fa35cd-4a93-4861-b361-e6bbd170c604",
+          "abilities_passed": 6,
+          "abilities_failed": 0,
+          "issues_detected": []
+        },
+        "memory_delta_keys": []
+      },
+      {
+        "phase": "lateral",
+        "objective": "Move laterally from the CASTELBLACK foothold to compromise winterfell.north.sevenkingdoms.local or other active domain hosts using recovered credentials and hashes.",
+        "outcome": "committed",
+        "skills_used": [
+          "moving-laterally"
+        ],
+        "techniques_used": [
+          "T1550.002",
+          "T1021.002",
+          "T1047"
+        ],
+        "ability_names": [
+          "L-PRE Pre-flight Checks and Credential Hunt",
+          "SMB Credential Validation via NetExec",
+          "Lateral Movement and Evidence Capture"
+        ],
+        "execution_outcome": null,
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {
+    "narratives": [
+      {
+        "phase": "discovery",
+        "ts": "2026-06-24T06:32:47.027046+00:00",
+        "text": "Established a foothold on CASTELBLACK, a Windows Server 2019 host joined to the north.sevenkingdoms.local domain with IP addresses 192.168.187.141 and 192.168.127.22. Local tools confirm Nmap 7.80 is available on the target. An active host was detected at 192.168.187.1, but an unauthenticated Active Directory rootDSE probe targeting 192.168.187.2 failed, indicating the server was not operational. No domain controllers were successfully identified, and initial sweep scripts encountered a PowerShell syntax error."
+      },
+      {
+        "phase": "discovery",
+        "ts": "2026-06-24T07:00:25.819862+00:00",
+        "text": "We have adjusted our approach on CASTELBLACK after a PowerShell syntax error hindered our initial sweep. The newly committed plan directly leverages Nmap to identify live hosts and map target subnets, circumventing past scripting limitations. We expect to discover the active hosts in the 192.168.127.0/24 and 192.168.187.0/24 subnets, scan them for standard services, and test for an active Active Directory Domain Controller via native LDAP queries. The final decision gate will dynamically guide us to either Active Directory enumeration or local privilege escalation based on the discovery results."
+      },
+      {
+        "phase": "discovery",
+        "ts": "2026-06-24T07:17:41.901150+00:00",
+        "text": "Completed discovery tasks from CASTELBLACK, confirming local subnets 169.254.0.0/16, 192.168.127.0/24, and 192.168.187.0/24. Initial Active Directory evaluation did not identify an operational Domain Controller in these ranges, resulting in a recommendation to transition the campaign to local privilege escalation on CASTELBLACK."
+      },
+      {
+        "phase": "privesc",
+        "ts": "2026-06-24T07:25:47.356366+00:00",
+        "text": "Transitioning from discovery to local privilege escalation on CASTELBLACK due to the absence of an operational Active Directory Domain Controller on the current subnets. We are initiating this phase with a non-disruptive, read-only check of our local user privileges and group memberships via PowerShell. The results of this initial verification will guide subsequent searches for service misconfigurations, registry values, or patch-related escalation vectors."
+      },
+      {
+        "phase": "privesc",
+        "ts": "2026-06-24T07:30:53.706589+00:00",
+        "text": "After resolving the PowerShell syntax issues from our previous attempt, we have committed a robust check to determine our local execution context on CASTELBLACK. We are creating a working directory at C:\\Windows\\Temp\\bas and outputting both whoami /all and whoami /groups to a file. Once executed, this will clarify our current integrity level and privilege state, allowing us to identify paths for local privilege escalation on this Windows Server 2019 target."
+      },
+      {
+        "phase": "privesc",
+        "ts": "2026-06-24T07:31:50.701502+00:00",
+        "text": "The identity check on CASTELBLACK succeeded, confirming the current user context is 'north\\test' with SID 'S-1-5-21-1001219898-3397012194-2462155686-1124'. This baseline privilege assessment establishes that we are operating under a standard domain account on the system, setting the stage for subsequent local privilege escalation analysis."
+      },
+      {
+        "phase": "credaccess",
+        "ts": "2026-06-24T07:43:23.744436+00:00",
+        "text": "Having established our context as 'north\\test' on CASTELBLACK, we have committed a multi-pronged credential access plan to secure the keys to the kingdom. We are executing local SAM and SYSTEM registry hive extraction, auditing DPAPI and browser data for flat-file credentials, and attempting memory-based extraction via Invoke-Mimikatz. Simultaneously, we are leveraging ADSI to perform Kerberoasting and AS-REP roasting checks against the domain, while verifying our capability to leverage SharpGPOAbuse. Once executed, these tasks will clarify our lateral movement and local escalation options."
+      },
+      {
+        "phase": "credaccess",
+        "ts": "2026-06-24T07:44:34.559473+00:00",
+        "text": "The credential access phase on CASTELBLACK encountered significant execution obstacles. Although three tasks completed with an exit code of 0, they suffered from internal script execution failures, including invalid registry key names during hive saving and broken catch-block syntax. The remaining tasks failed completely due to PowerShell parse errors, leaving no credentials successfully extracted during this attempt."
+      },
+      {
+        "phase": "credaccess",
+        "ts": "2026-06-24T07:55:32.246358+00:00",
+        "text": "Having corrected the PowerShell quotation and syntax errors from the previous attempt, we have committed a revised plan to extract credentials on CASTELBLACK. The upcoming tasks include ADSI-based Kerberoasting and AS-REP roasting checks, SAM/SYSTEM registry hive dumps, LSASS extraction via Invoke-Mimikatz, and a baseline verification of SharpGPOAbuse. Successful execution of these tasks is expected to populate local files in C:\\Windows\\Temp\\bas\\ to resolve our immediate credential access objectives and clarify our privilege boundaries."
+      },
+      {
+        "phase": "credaccess",
+        "ts": "2026-06-24T09:55:10.940559+00:00",
+        "text": "We have successfully executed credential access tasks on CASTELBLACK. We confirmed that the user 'brandon.stark' is AS-REP roastable. Additionally, local SAM and SYSTEM registry hives were successfully exported to disk, and Mimikatz executed successfully on the target, confirming the host as castelblack.north.sevenkingdoms.local with Domain SID S-1-5-21-1001219898-3397012194-2462155686. However, the attempt to verify SharpGPOAbuse failed as the executable was not found on the path."
+      },
+      {
+        "phase": "ad-enumeration",
+        "ts": "2026-06-24T10:08:39.836517+00:00",
+        "text": "We have transitioned from local credential extraction on CASTELBLACK to systematic domain enumeration. With the foothold verified as north\\test and brandon.stark identified as AS-REP roastable, the next step involves mapping out the Active Directory structure. The committed plan deploys ADSI queries for domain controllers, DNS zones, policies, and trusts, while running Certify.exe to check for AD CS vulnerabilities and SharpHound.exe for a full path analysis. Once executed, this data will reveal the optimal vectors for lateral movement and domain privilege escalation."
+      },
+      {
+        "phase": "ad-enumeration",
+        "ts": "2026-06-24T10:09:43.916668+00:00",
+        "text": "During Active Directory enumeration on CASTELBLACK, we successfully identified the domain as \"north.sevenkingdoms.local\" and its domain controller as \"winterfell.north.sevenkingdoms.local\". We enumerated the members of the Domain Admins group, confirming that \"ethic\", \"eddard.stark\", and \"Administrator\" hold high-privileged domain access. However, attempts to perform advanced enumeration using Certify.exe and SharpHound.exe failed because both executables were missing from the target's system path, and an ADSI-based directory existence check encountered a minor attribute error."
+      },
+      {
+        "phase": "lateral",
+        "ts": "2026-06-24T10:17:32.378178+00:00",
+        "text": "We have established a solid foothold on CASTELBLACK as north\\test and mapped out the domain structure, identifying winterfell.north.sevenkingdoms.local as the Domain Controller. With registry hives dumped locally and brandon.stark identified as AS-REP roastable, our next move is lateral. We have committed a plan to perform pre-flight checks on the DC, scan for cached NTLM hashes or passwords, validate credentials using NetExec, and execute a remote command on the domain controller to solidify our lateral presence."
+      },
+      {
+        "phase": "lateral",
+        "ts": "2026-06-24T10:19:28.195375+00:00",
+        "text": "During pre-flight lateral movement checks targeting the domain controller winterfell.north.sevenkingdoms.local (192.168.127.11), we confirmed that ports 445, 5985, and 5986 are open and LocalAccountTokenFilterPolicy is enabled (value: 1). While credential validation via NetExec completed successfully and verified the tool's path, the final lateral movement initialization task failed with a script error indicating it could not index into a null array."
+      }
+    ]
+  }
+}

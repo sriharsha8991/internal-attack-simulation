@@ -1,0 +1,22 @@
+{
+  "adversary_id": "bce1df08-e086-427a-9319-344c72d41423",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-24T07:00:15.699792+00:00",
+  "adversary": {
+    "name": "APT Network Discovery Sweep",
+    "description": "Domain-aware passive and active network discovery sweep and service enumeration targeting active Domain Controllers.",
+    "profile": "APT-Discovery",
+    "execution_strategy": "Sequential execution of native command-line and local Nmap discovery to safely map networks without administrative lockout risks.",
+    "requires_approval": false,
+    "is_tested": true,
+    "created_by": "ai",
+    "engagement_id": "2b46bea0854443f1a134f53563af2133"
+  },
+  "linked_ability_ids": [
+    "d387f160-5668-4b47-92a9-ec41d9388456",
+    "7d8fa028-86ca-434e-a2b7-d52d67bd6024",
+    "1b9499a4-fcc0-4be4-beec-06b5de0f09ae",
+    "d8d1a140-b21f-479d-8791-c9fc8d61a680",
+    "28e09e7f-2583-400d-b42e-5d4dd9fb1111"
+  ]
+}

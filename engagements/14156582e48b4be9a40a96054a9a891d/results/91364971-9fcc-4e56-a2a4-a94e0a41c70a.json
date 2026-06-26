@@ -1,0 +1,48 @@
+{
+  "operation_id": "91364971-9fcc-4e56-a2a4-a94e0a41c70a",
+  "engagement_id": "14156582-e48b-4be9-a40a-96054a9a891d",
+  "name": "Auto Test - Security Hardening Specialist",
+  "status": "completed",
+  "environment": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "name": "Test Prod"
+  },
+  "adversary": {
+    "adversary_id": "47434e1e-b065-49f4-9020-c3752cac96b9",
+    "engagement_id": "14156582-e48b-4be9-a40a-96054a9a891d",
+    "name": "Security Hardening Specialist",
+    "is_tested": true
+  },
+  "required_platforms": [
+    "windows"
+  ],
+  "platform_agents": {
+    "windows": {
+      "agent_id": "277f297f",
+      "hostname": "CASTELBLACK",
+      "platform": "windows"
+    },
+    "linux": null,
+    "mac": null
+  },
+  "progress": {
+    "total_abilities": 1,
+    "completed_abilities": 1,
+    "progress_percent": 100
+  },
+  "started_at": "2026-06-23T16:44:52.218869",
+  "completed_at": "2026-06-23T16:44:58.697713",
+  "kill_switch_triggered": false,
+  "execution_logs": [
+    {
+      "ability_id": "085a0222-a4ec-4632-9551-ca2249c07511",
+      "stage_id": "478f9b24-a655-46a9-8f9d-e337eb607791",
+      "command_executed": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d|Out-Null}; $(try { $ErrorActionPreference = 'Stop'; Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name 'RunAsPPL' } catch { \"ERROR: LSA Protection key check failed or not set - $_\" }) | Tee-Object -FilePath $d\\out.txt",
+      "stdout": "ERROR: LSA Protection key check failed or not set - Property RunAsPPL does not exist at path HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Lsa.\n",
+      "stderr": "",
+      "exit_code": 0,
+      "executor": "",
+      "timestamp": "2026-06-23T16:44:53.382451"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "run_id": "14156582e48b4be9a40a96054a9a891d",
+  "status": "failed",
+  "started_at": "2026-06-23T10:15:33.980166+00:00",
+  "finished_at": "2026-06-23T11:34:34.312339+00:00",
+  "request": {
+    "phases": [
+      "discovery",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "environment": {
+      "id": "82e01037-11db-4b59-a79c-661b3838cfea",
+      "name": "Test Prod"
+    },
+    "target": {
+      "platform": "windows"
+    },
+    "max_iterations": 25,
+    "dry_run": true
+  },
+  "state": null,
+  "error": "TypeError: Object of type UUID is not JSON serializable\nTraceback (most recent call last):\n  File \"/app/src/bas/worker.py\", line 678, in _resume_graph\n    state = _stream_graph(\n            ^^^^^^^^^^^^^^\n  File \"/app/src/bas/orchestrator/graph.py\", line 1325, in _stream_graph\n    for chunk in app.stream(seed, config=run_config, stream_mode=\"updates\"):\n  File \"/opt/venv/lib/python3.11/site-packages/langgraph/pregel/main.py\", line 2936, in stream\n    for _ in runner.tick(\n  File \"/opt/venv/lib/python3.11/site-packages/langgraph/pregel/_runner.py\", line 207, in tick\n    run_with_retry(\n  File \"/opt/venv/lib/python3.11/site-packages/langgraph/pregel/_retry.py\", line 585, in run_with_retry\n    return task.proc.invoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/langgraph/_internal/_runnable.py\", line 684, in invoke\n    input = context.run(step.invoke, input, config, **kwargs)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/langgraph/_internal/_runnable.py\", line 426, in invoke\n    ret = self.func(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/src/bas/orchestrator/graph.py\", line 758, in push_node\n    push: PushResult = push_specialist(\n                       ^^^^^^^^^^^^^^^^\n  File \"/app/src/bas/agents/specialist.py\", line 650, in push_specialist\n    st_resp = bas.abilities.create_stage(ab_resp.ability_id, stage)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/src/bas/client/abilities.py\", line 34, in create_stage\n    data = self._t.post_json(\n           ^^^^^^^^^^^^^^^^^^\n  File \"/app/src/bas/client/transport.py\", line 75, in post_json\n    resp = self.request(\"POST\", path, json=json, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/src/bas/client/transport.py\", line 56, in request\n    resp = self._http.request(method, path, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/httpx/_client.py\", line 812, in request\n    request = self.build_request(\n              ^^^^^^^^^^^^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/httpx/_client.py\", line 378, in build_request\n    return Request(\n           ^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/httpx/_models.py\", line 408, in __init__\n    headers, stream = encode_request(\n                      ^^^^^^^^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/httpx/_content.py\", line 216, in encode_request\n    return encode_json(json)\n           ^^^^^^^^^^^^^^^^^\n  File \"/opt/venv/lib/python3.11/site-packages/httpx/_content.py\", line 177, in encode_json\n    body = json_dumps(\n           ^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/json/__init__.py\", line 238, in dumps\n    **kw).encode(obj)\n          ^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/json/encoder.py\", line 200, in encode\n    chunks = self.iterencode(o, _one_shot=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/json/encoder.py\", line 258, in iterencode\n    return _iterencode(o, 0)\n           ^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/json/encoder.py\", line 180, in default\n    raise TypeError(f'Object of type {o.__class__.__name__} '\nTypeError: Object of type UUID is not JSON serializable\nDuring task with name 'push' and id '22c7f6dc-cbe1-3f8e-8c58-11e383bfa985'\n",
+  "skill_order": [
+    "discovery",
+    "privesc",
+    "credaccess",
+    "lateral",
+    "persistence",
+    "defevasion",
+    "impact"
+  ],
+  "foothold": {
+    "environment_id": "82e01037-11db-4b59-a79c-661b3838cfea",
+    "environment_name": "Test Prod",
+    "agent_id": "277f297f",
+    "hostname": "CASTELBLACK",
+    "platform": "windows",
+    "ip_address": "192.168.187.141",
+    "display_status": "online"
+  }
+}

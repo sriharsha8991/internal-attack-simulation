@@ -1,0 +1,34 @@
+{
+  "ability_id": "e3b6652b-03f9-4eb6-a13f-33d0ca3af53a",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-25T06:36:49.614669+00:00",
+  "ability": {
+    "name": "Machine Context Check",
+    "description": "Determine host platform, domain membership status, current identity, and available system privileges using native OS queries.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1033",
+    "platform": "windows",
+    "impact_type": "information-gathering",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "recon",
+      "context"
+    ],
+    "created_by": "ai",
+    "engagement_id": "e70e34e075264e7c97c2156a69c0574b"
+  },
+  "stages": [
+    {
+      "stage_name": "check_context",
+      "stage_order": 1,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $id = whoami /all 2>&1; $priv = whoami /priv 2>&1; $cs = Get-WmiObject Win32_ComputerSystem -ErrorAction Stop; $dom = $cs.PartOfDomain; $dn = $cs.Domain; $os = (Get-WmiObject Win32_OperatingSystem -ErrorAction Stop).Caption; $hn = $env:COMPUTERNAME; $adapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixLength -lt 32 } | ForEach-Object { $b = ([System.Net.IPAddress]$_.IPAddress).GetAddressBytes(); $mk = [System.BitConverter]::GetBytes([uint32]([Math]::Pow(2,32)-[Math]::Pow(2,32-$_.PrefixLength))); if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($mk) }; $net = (0..3|ForEach-Object{$b[$_]-band $mk[$_]}) -join '.'; \"ADAPTER: $($_.InterfaceAlias)  IP: $($_.IPAddress)  CIDR: $net/$($_.PrefixLength)\" }; Write-Output \"PLATFORM: windows\"; Write-Output \"HOSTNAME: $hn\"; Write-Output \"DOMAIN_JOINED: $dom\"; Write-Output \"DOMAIN: $dn\"; Write-Output \"OS: $os\"; $adapters | ForEach-Object { Write-Output $_ }; Write-Output \"--- WHOAMI_ALL ---\"; $id; Write-Output \"--- WHOAMI_PRIV ---\"; $priv; $localAdmins = net localgroup administrators 2>&1; Write-Output \"--- LOCAL_ADMINS ---\"; $localAdmins } catch { Write-Output \"ERROR: step0_windows $($_.Exception.Message)\" }) | Tee-Object -FilePath $d\\step0.txt",
+      "timeout_seconds": 60,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Initial foothold evaluation determines the operating parameters, OS versions, and structural domains of our target, allowing us to pivot or adapt silently without dropping custom tools prematurely.",
+  "provider": "Native",
+  "cited_urls": []
+}

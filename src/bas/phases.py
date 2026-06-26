@@ -1,7 +1,7 @@
 """Kill-chain phase → skill name mapping.
 
 The skills register a `stage` in their YAML frontmatter (discovery, privesc,
-credaccess, lateral, persistence, defevasion, impact). Callers refer to phases
+ad-enumeration, credaccess, lateral, persistence, defevasion, impact). Callers refer to phases
 by those canonical names so the API never needs to know individual skill names.
 
 Phase aliases are normalised in `_normalise_phase` so common synonyms work
@@ -27,6 +27,7 @@ class Phase(str, Enum):
     """
 
     DISCOVERY = "discovery"
+    AD_ENUMERATION = "ad-enumeration"
     PRIVESC = "privesc"
     CREDACCESS = "credaccess"
     LATERAL = "lateral"
@@ -41,6 +42,12 @@ _ALIASES: dict[str, Phase] = {
     "reconnaissance": Phase.DISCOVERY,
     "discover": Phase.DISCOVERY,
     "discovery": Phase.DISCOVERY,
+    "ad": Phase.AD_ENUMERATION,
+    "ad-enum": Phase.AD_ENUMERATION,
+    "ad-enumeration": Phase.AD_ENUMERATION,
+    "active-directory-enumeration": Phase.AD_ENUMERATION,
+    "enumerating-active-directory": Phase.AD_ENUMERATION,
+    "domain-enumeration": Phase.AD_ENUMERATION,
     "privilege-escalation": Phase.PRIVESC,
     "privilegeescalation": Phase.PRIVESC,
     "priv-esc": Phase.PRIVESC,
@@ -97,7 +104,10 @@ def resolve_phases_to_skills(
 
 
 def known_phases(skill_tool: SkillTool) -> list[str]:
-    return sorted(build_phase_index(skill_tool).keys())
+    index = build_phase_index(skill_tool)
+    ordered = [phase.value for phase in Phase if phase.value in index]
+    extras = sorted(phase for phase in index if phase not in ordered)
+    return ordered + extras
 
 
 def first_skill_for_phase(phase: str, skill_tool: SkillTool) -> str | None:

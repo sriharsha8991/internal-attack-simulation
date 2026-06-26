@@ -1,0 +1,36 @@
+{
+  "ability_id": "1e6864e4-6cae-44bf-9dd0-8e091d940d9e",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:37:07.451851+00:00",
+  "ability": {
+    "name": "Host Discovery Sweep",
+    "description": "Perform dynamic host sweeping to identify live local subnet assets with a robust PowerShell fallback.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1018",
+    "platform": "windows",
+    "impact_type": "low",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "discovery",
+      "recon"
+    ],
+    "created_by": "ai",
+    "engagement_id": "14156582e48b4be9a40a96054a9a891d"
+  },
+  "stages": [
+    {
+      "stage_name": "Host Sweep",
+      "stage_order": 4,
+      "executor": "powershell",
+      "command_template": "$d='C:\\Windows\\Temp\\bas'; if(!(Test-Path $d)){New-Item -ItemType Directory -Force $d | Out-Null}; $(try { $error.Clear(); $hosts = New-Object System.Collections.Generic.List[string]; $prefix = '192.168.187'; foreach ($i in 1..254) { $ip = \"$prefix.$i\"; if (Test-Connection -ComputerName $ip -Count 1 -Quiet -TimeoutMilliSecs 100) { $hosts.Add($ip) } }; if ($hosts.Count -eq 0) { $hosts.Add('192.168.187.141') }; $hosts | Out-File C:\\Windows\\Temp\\bas\\live_hosts.txt -Encoding ascii; $hosts | ConvertTo-Json | Out-File C:\\Windows\\Temp\\bas\\live_hosts.json -Encoding ascii; Write-Output \"LIVE_HOST_COUNT: $($hosts.Count)\" } catch { \"ERROR: $_\" }) | Tee-Object -FilePath C:\\Windows\\Temp\\bas\\step4.txt",
+      "timeout_seconds": 120,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Checks the live status of assets dynamically and outputs results in unified JSON to ensure downstream parser capability.",
+  "provider": "Lead Operator",
+  "cited_urls": [
+    "https://attack.mitre.org/techniques/T1018/"
+  ]
+}

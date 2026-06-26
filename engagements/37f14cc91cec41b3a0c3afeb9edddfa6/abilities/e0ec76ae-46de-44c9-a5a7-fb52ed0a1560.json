@@ -1,0 +1,33 @@
+{
+  "ability_id": "e0ec76ae-46de-44c9-a5a7-fb52ed0a1560",
+  "skill": "discovering-environment",
+  "saved_at": "2026-06-23T10:05:49.251945+00:00",
+  "ability": {
+    "name": "Step 1 - Register Subnets",
+    "description": "Registers subnets to prepare for multi-homing sweeps.",
+    "mitre_tactic": "TA0007",
+    "mitre_technique_id": "T1016",
+    "platform": "windows",
+    "impact_type": "None",
+    "default_severity": "low",
+    "requires_approval": false,
+    "tags": [
+      "net-config"
+    ],
+    "created_by": "ai",
+    "engagement_id": "37f14cc91cec41b3a0c3afeb9edddfa6"
+  },
+  "stages": [
+    {
+      "stage_name": "Read Adapters",
+      "stage_order": 2,
+      "executor": "powershell",
+      "command_template": "$d='C:\\\\Windows\\\\Temp\\\\bas'; if(!(Test-Path $d)){ni -ItemType Directory -Force $d|out-null}; $(try { $cidrs_file = \"$d\\network_cidrs.txt\"; if (Test-Path $cidrs_file) { $cidrs = Get-Content $cidrs_file; $primary = $cidrs[0]; Write-Output \"PRIMARY_CIDR: $primary\"; Write-Output \"ALL_CIDRS: $($cidrs | ConvertTo-Json -Compress)\" } else { throw \"network_cidrs.txt not found\" } } catch { Write-Output \"ERROR: step1 failed - $_\" }) | Tee-Object -FilePath $d\\step1.txt",
+      "timeout_seconds": 600,
+      "payload_id": null
+    }
+  ],
+  "rationale": "Extracts the dynamically determined network adapter configurations.",
+  "provider": "specialist",
+  "cited_urls": []
+}

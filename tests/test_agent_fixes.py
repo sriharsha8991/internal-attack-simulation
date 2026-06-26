@@ -14,6 +14,9 @@ from __future__ import annotations
 from bas.llm.base import GroundingBudgetExceeded
 from bas.llm.gemini import _is_retryable
 from bas.orchestrator.graph import _deep_merge, _merge_lists
+from bas.phases import Phase, _normalise_phase, known_phases, resolve_phases_to_skills
+from bas.schemas import EngagementCreateRequest
+from bas.tools import SkillTool
 
 
 # ---- P6: deep merge --------------------------------------------------------
@@ -53,3 +56,42 @@ def test_is_retryable_transient_vs_fatal():
     # Deterministic failures must NOT be retried.
     assert not _is_retryable(Exception("400 invalid argument"))
     assert not _is_retryable(GroundingBudgetExceeded("budget"))
+
+
+# ---- Phase contract --------------------------------------------------------
+
+
+def test_ad_enumeration_phase_alias_and_skill_resolution():
+    skill_tool = SkillTool("skills").prime()
+    assert _normalise_phase("ad-enum") == Phase.AD_ENUMERATION
+    resolved, unknown = resolve_phases_to_skills(["ad-enumeration"], skill_tool)
+    assert unknown == []
+    assert resolved == ["enumerating-active-directory"]
+    assert known_phases(skill_tool) == [
+        "discovery",
+        "ad-enumeration",
+        "privesc",
+        "credaccess",
+        "lateral",
+        "persistence",
+        "defevasion",
+        "impact",
+    ]
+
+
+def test_engagement_request_accepts_safety_acks():
+    req = EngagementCreateRequest.model_validate(
+        {
+            "phases": ["discovery", "ad-enumeration"],
+            "safety": {"acks": ["destructive", "persistence"]},
+        }
+    )
+    assert req.phases == [Phase.DISCOVERY, Phase.AD_ENUMERATION]
+    assert req.safety.acks == ["destructive", "persistence"]
+
+
+def test_engagement_request_can_omit_or_empty_phases_for_all_phase_default():
+    omitted = EngagementCreateRequest.model_validate({})
+    empty = EngagementCreateRequest.model_validate({"phases": []})
+    assert omitted.phases is None
+    assert empty.phases == []

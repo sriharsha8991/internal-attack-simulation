@@ -1,0 +1,65 @@
+{
+  "run_id": "1d55cfc5b13c4606b05f392cdd678e98",
+  "updated_at": "2026-06-25T10:21:08.018197+00:00",
+  "label": "push/discovery/pending",
+  "campaign_progress": {
+    "current_phase": "discovery",
+    "completed_phases": [],
+    "available_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "remaining_phases": [
+      "discovery",
+      "ad-enumeration",
+      "privesc",
+      "credaccess",
+      "lateral",
+      "persistence",
+      "defevasion",
+      "impact"
+    ],
+    "iteration": 1,
+    "phase_history": [
+      {
+        "phase": "discovery",
+        "objective": "Perform initial network and local host discovery from the CASTELBLACK foothold to identify domain structure and network topology.",
+        "outcome": "committed",
+        "skills_used": [
+          "discovering-environment"
+        ],
+        "techniques_used": [
+          "T1046",
+          "T1033",
+          "T1018",
+          "T1518",
+          "T1016"
+        ],
+        "ability_names": [
+          "Step 0 - Machine Context Check",
+          "Step 1 - Determine local network range",
+          "Step 2 - Confirm Nmap presence",
+          "Step 4 - Host Discovery / Live-Asset Map",
+          "Step 5 - Service / Port Enumeration",
+          "Step 7 - Domain Controller Verification"
+        ],
+        "execution_outcome": null,
+        "memory_delta_keys": []
+      }
+    ]
+  },
+  "memory": {
+    "pending.discovery.Step 0 - Machine Context Check": "awaiting_results",
+    "pending.discovery.Step 1 - Determine local network range": "awaiting_results",
+    "pending.discovery.Step 2 - Confirm Nmap presence": "awaiting_results",
+    "pending.discovery.Step 4 - Host Discovery / Live-Asset Map": "awaiting_results",
+    "pending.discovery.Step 5 - Service / Port Enumeration": "awaiting_results",
+    "pending.discovery.Step 7 - Domain Controller Verification": "awaiting_results"
+  }
+}
