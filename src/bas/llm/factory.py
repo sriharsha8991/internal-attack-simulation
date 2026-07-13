@@ -27,11 +27,25 @@ def get_provider(cfg: "LlmConfig") -> LLMProvider:
             thinking_level=cfg.thinking_level,
         )
     if name == "anthropic":
-        from .anthropic import AnthropicProvider
+        from .anthropic import build_from_env as anthropic_build_from_env
 
-        return AnthropicProvider()
+        return anthropic_build_from_env(
+            model=cfg.model,
+            classifier_model=cfg.classifier_model,
+            api_key_env=cfg.api_key_env,
+            temperature=cfg.temperature,
+            max_grounded_calls_per_run=cfg.grounding.max_grounded_calls_per_run,
+            thinking_level=cfg.thinking_level,
+        )
     if name == "openai":
-        from .openai import OpenAIProvider
+        from .openai import build_from_env as openai_build_from_env
 
-        return OpenAIProvider()
+        return openai_build_from_env(
+            model=cfg.model,
+            classifier_model=cfg.classifier_model,
+            api_key_env=cfg.api_key_env,
+            temperature=cfg.temperature,
+            max_grounded_calls_per_run=cfg.grounding.max_grounded_calls_per_run,
+            thinking_level=cfg.thinking_level,
+        )
     raise LLMProviderError(f"unknown llm.provider: {cfg.provider!r}")

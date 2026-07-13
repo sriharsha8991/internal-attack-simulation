@@ -66,12 +66,14 @@ name = "bas-orchestrator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anthropic" },
     { name = "fastapi" },
     { name = "google-genai" },
     { name = "httpx" },
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
+    { name = "langsmith" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "typer" },
@@ -91,6 +93,7 @@ studio = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", specifier = ">=0.102.0" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.39" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "google-genai", specifier = ">=0.3" },
@@ -99,6 +102,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.2" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0" },
     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'studio'", specifier = ">=0.1.60" },
+    { name = "langsmith", specifier = ">=0.8.5" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.40" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
