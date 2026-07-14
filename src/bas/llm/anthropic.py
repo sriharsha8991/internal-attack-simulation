@@ -38,6 +38,8 @@ import random
 import time
 from typing import Any, TypeVar
 from langsmith import traceable
+from langsmith.wrappers import wrap_anthropic
+
 
 from pydantic import BaseModel, ValidationError
 
@@ -176,7 +178,9 @@ class AnthropicProvider:
             raise LLMProviderError("AnthropicProvider requires a non-empty api_key")
 
         self._anthropic = anthropic
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._client = wrap_anthropic(
+            anthropic.Anthropic(api_key=api_key)
+        )
         self._model = model
         self._classifier_model = classifier_model
         self._temperature = temperature
@@ -252,9 +256,10 @@ class AnthropicProvider:
             }
         kwargs["output_config"] = output_config
         return kwargs
+    
     @traceable(
         run_type="llm",
-        name="anthropic.messages.create",
+        name="Anthropic Messages API",
     )
     def _generate(
         self,

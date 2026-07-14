@@ -16,18 +16,18 @@ and quick selection guidance.
 
 | #   | Technique                                                                             | Priority  | MITRE               | Primary tools                                               | Pivot hint                                            |
 |-----|---------------------------------------------------------------------------------------|-----------|---------------------|-------------------------------------------------------------|-------------------------------------------------------|
-| D1  | BloodHound full collection                                                            | Critical  | T1087.002           | sharphound, bloodhound-python, azurehound                   | drives every other stage                              |
+| D1  | BloodHound full collection                                                            | Critical  | T1087.002           | SharpHound.exe (Windows) · bloodhound-python (Linux) · azurehound (Azure) | drives every other stage             |
 | D2  | ACL / Permission Abuse Discovery (GenericAll, WriteDACL, ForceChangePassword, DCSync) | Critical  | T1069.002           | [DirectoryEntry].ObjectSecurity (Win), ldapsearch (Lin), daclenum | accessing-credentials (DCSync) / moving-laterally     |
 | D3  | AD CS Vulnerability Discovery (ESC1–ESC13)                                            | Critical  | T1649               | certipy, certify, pspkiaudit, locksmith                     | escalating-privileges / accessing-credentials         |
 | D4  | SMB & Network Share Enumeration                                                       | Important | T1135               | snaffler, sauroneye, sharpshares, powerview, netexec        | accessing-credentials (creds in files)                |
 | D5  | Logged-on User / Admin Session Hunting                                                | Important | T1033               | powerview, bloodhound, netexec, netsess                     | moving-laterally (target host with DA session)        |
 | D6  | Domain User / Group Enumeration                                                       | Important | T1087.002           | [DirectorySearcher] (Win), ldapsearch (Lin)                 | input to spray/roast                                  |
 | D7  | Forest & Trust Relationship Mapping                                                   | Important | T1482               | [Domain]::GetCurrentDomain() (Win), ldapsearch trustedDomain (Lin) | cross-domain pivot                              |
-| D8  | Internal Network Scanning                                                             | Important | T1046               | nmap, masscan, netexec, invoke-portscan, pingcastle         | finds DCs/admin hosts                                 |
+| D8  | Internal Network Scanning                                                             | Important | T1046               | nmap or native OS commands — AI chooses based on availability | finds DCs/admin hosts                               |
 | D9  | Kerberoastable / AS-REP Roastable Discovery                                           | Critical  | T1558.003/T1558.004 | bloodhound, powerview, rubeus, impacket-getuserspns, kerbrute | accessing-credentials (offline crack)               |
 | D10 | GPO Enumeration                                                                       | Important | T1615               | [DirectorySearcher] CN=Policies + findstr SYSVOL (Win), ldapsearch (Lin) | escalating-privileges / moving-laterally  |
 | D11 | Domain Controller Discovery (FSMO roles)                                              | Important | T1018               | [DirectorySearcher] UAC filter (Win), ldapsearch (Lin), nltest | Tier-0 target list                                 |
-| D12 | Process / Service Discovery                                                           | Important | T1057 / T1007       | seatbelt, winpeas, tasklist, powerview, wmi                 | identifies AV/EDR, DA-spawned processes               |
+| D12 | Process / Service Discovery                                                           | Important | T1057 / T1007       | native OS commands first (WMI, sc query, Get-Process) — Seatbelt/WinPEAS only after AMSI bypass | identifies AV/EDR, DA-spawned processes |
 | D13 | DNS Enumeration                                                                       | Important | T1590.002           | adidnsdump, dnsx, powerview, nslookup, dig                  | hidden hosts / new segments                           |
 | D14 | Azure AD / Hybrid Enumeration                                                         | Important | T1538               | roadtools, aadinternals, azurehound, stormspotter           | hybrid impact path                                    |
 | D15 | Password Policy Discovery                                                             | Critical  | T1201               | [DirectoryEntry] lockoutThreshold attr (Win), ldapsearch (Lin) | gates password spray — abort if lockout threshold ≤ 3 |
@@ -40,6 +40,15 @@ and quick selection guidance.
 ---
 
 ## Selection guidance
+
+**The AI selects tools and generates commands at runtime based on:**
+- `host.platform` in memory → determines Windows vs Linux command path
+- `recon.nmap_available` in memory → determines scan method
+- `domain.base_dn` / `network.dc_ip` / `creds.*` in memory → substituted into every LDAP query
+- What tools are confirmed in `tool_allowlist` → what binary to call
+- What prior steps found → which optional steps are warranted
+
+**Never copy hardcoded commands. Generate from memory state.**
 
 - Always run D1 first; D2 follows automatically once BloodHound data is ingested.
 - D3 runs in parallel with D1 — different network paths, no contention.
@@ -72,13 +81,13 @@ and quick selection guidance.
 - Fallback: `bloodhound-python -c All` from a Linux pivot if SharpHound.exe is AV-blocked on the Windows target.
 - **On success — save:** `ad.bloodhound_zip` = path to zip file. Write zip to `temp/bas/bloodhound/<timestamp>_BloodHound.zip`.
 - Expected output:
-  - SharpHound.exe produces a zip file containing: `computers.json`, `users.json`, `groups.json`, `sessions.json`, `acls.json`, `gpos.json`
-  - Shortest Paths to Domain Admins graph in BloodHound GUI
+  - A zip file containing: computers.json, users.json, groups.json, sessions.json, acls.json, gpos.json
+  - Graph showing shortest paths to Domain Admins
   - List of Kerberoastable accounts with SPNs
-  - List of accounts with DCSync rights (DS-Replication-Get-Changes*)
-  - Hosts with unconstrained / constrained delegation flags
+  - List of accounts with DCSync rights
+  - Hosts with unconstrained / constrained delegation
   - ACL attack paths: GenericAll, WriteDACL, ForceChangePassword edges
-  - Active DA sessions: which machine DA is logged on right now
+  - Active DA sessions
 - Cycle / next:
   - DA path found → `moving-laterally` (skip remaining steps)
   - Kerberoastable accounts found → D9 → `accessing-credentials`
@@ -248,18 +257,18 @@ and quick selection guidance.
 ## D12 — Process / service discovery (Important)
 
 - MITRE: T1057 / T1007
-- Tools: seatbelt, winpeas, tasklist, powerview, wmi
-- Preconditions: local execution on target host (any privilege; SYSTEM for full output).
+- Tools: native OS commands primary (WMI, sc query, Get-Process, registry reads).
+  Seatbelt / WinPEAS only after AMSI bypass is confirmed — never as first attempt.
+- Preconditions: local execution on target host.
+- Goal: identify AV/EDR products, running processes, token privileges, integrity level.
 - Expected output:
-  - Seatbelt: AV products running, EDR hooks, PowerShell logging status
-  - WinPEAS: `[+]` = confirmed finding, `[?]` = potential finding
-  - `whoami /all`: current SID, group memberships, token privileges
-  - Token privileges of interest: SeImpersonatePrivilege (Potato attacks),
-    SeBackupPrivilege (read NTDS.dit), SeDebugPrivilege (attach to LSASS)
-  - Installed AV/EDR: defines which tools can run without modification
+  - AV/EDR product names and protection status
+  - Current identity: SID, group memberships, token privileges
+  - Token privileges of interest: SeImpersonatePrivilege, SeBackupPrivilege, SeDebugPrivilege
+  - Running processes and services list
 - Cycle / next:
-  - EDR present → `defense-evasion` (AMSI + EDR bypass) before any noisy tools
-  - SeImpersonatePrivilege → `escalating-privileges` (Potato attacks)
+  - EDR present → flag for `evading-defenses` before any noisy tools
+  - SeImpersonatePrivilege → flag for `escalating-privileges` (Potato attacks)
 
 ---
 
@@ -292,7 +301,7 @@ and quick selection guidance.
 
 - MITRE: T1201
 - Tools (Windows): `[DirectoryEntry]` read of `lockoutThreshold`, `lockoutObservationWindow`, `minPwdLength` directly from domain object — no PowerView or AD module.
-- Tools (Linux): `ldapsearch -b "<BASE_DN>" -s base lockoutThreshold lockoutObservationWindow`.
+- Tools (Linux): `ldapsearch` on domain root object — attributes: lockoutThreshold, lockoutObservationWindow, minPwdLength, pwdProperties.
 - Preconditions: any domain user. **Always run before any password spray.**
 - Success indicators: `LockoutThreshold` and `LockoutObservationWindow` values retrieved.
 - **Gate rule: abort spray planning if lockout threshold ≤ 3.**
@@ -309,8 +318,8 @@ and quick selection guidance.
 ## D16 — Delegation discovery (Important)
 
 - MITRE: T1558
-- Tools (Windows): `[DirectorySearcher]` with `userAccountControl:1.2.840.113556.1.4.803:=524288` (unconstrained) and `msDS-AllowedToDelegateTo=*` (constrained) — no PowerView.
-- Tools (Linux): `ldapsearch` with same filters.
+- Tools (Windows): `[DirectorySearcher]` with UAC bit filter for TrustedForDelegation (unconstrained) and `msDS-AllowedToDelegateTo` attribute (constrained) — no PowerView needed.
+- Tools (Linux): `ldapsearch` with same LDAP filters.
 - Preconditions: any domain user.
 - Expected output: hosts annotated with `unconstrained`, `constrained`, `rbcd_writable`.
 - Cycle / next:
